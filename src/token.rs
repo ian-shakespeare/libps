@@ -12,10 +12,29 @@ pub enum Token<'a> {
 
 use crate::operator::Operator;
 
+#[derive(Debug)]
 pub enum Token {
     Integer(i32),
     Real(f64),
     Operator(Operator),
+}
+
+impl PartialEq for Token {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Token::Integer(n) => match other {
+                Token::Integer(other_n) => n == other_n,
+                Token::Real(other_r) => f64::from(*n) == *other_r,
+                _ => false,
+            },
+            Token::Real(r) => match other {
+                Token::Integer(other_n) => *r == f64::from(*other_n),
+                Token::Real(other_r) => r == other_r,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
 }
 
 pub fn tokenize<'a>(s: &'a str) -> Result<Vec<Token>, ()> {
@@ -29,32 +48,12 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Vec<Token>, ()> {
             Some(char) => match char.is_ascii() {
                 false => break,
                 true => match char {
-                    '0'..='9' => {
-                        let mut word = String::new();
-                        let mut j = i;
-                        'word: while let Some(next_char) = chars.get(j) {
-                            if *next_char != '.' && !('0'..='9').contains(next_char) {
-                                j -= 1;
-                                break 'word;
-                            }
-
-                            word.push(next_char.clone());
-                            j += 1;
-                        }
-                        match word.parse::<i32>() {
-                            Ok(n) => tokens.push(Token::Integer(n)),
-                            Err(_) => match word.parse::<f64>() {
-                                Ok(r) => tokens.push(Token::Real(r)),
-                                Err(_) => return Err(()),
-                            },
-                        }
-                        i = j;
-                    }
                     '+' => tokens.push(Token::Operator(Operator::Add)),
-                    '-' => tokens.push(Token::Operator(Operator::Subtract)),
-                    '*' => tokens.push(Token::Operator(Operator::Multiply)),
-                    '/' => tokens.push(Token::Operator(Operator::Divide)),
-                    ' ' | '\t' | '\r' | '\n' => (),
+                    '-' => tokens.push(tokenize_dash(&chars, &mut i)?),
+                    '*' => tokens.push(Token::Operator(Operator::Mul)),
+                    '/' => tokens.push(Token::Operator(Operator::Div)),
+                    '.' | '0'..='9' => tokens.push(tokenize_numeric(&chars, &mut i)?),
+                    ' ' | '\t' | '\r' | '\n' => (), // Do nothing on white space
                     _ => return Err(()),
                 },
             },
@@ -64,6 +63,45 @@ pub fn tokenize<'a>(s: &'a str) -> Result<Vec<Token>, ()> {
     }
 
     Ok(tokens)
+}
+
+fn tokenize_dash(chars: &Vec<char>, index: &mut usize) -> Result<Token, ()> {
+    if let Some(next_char) = (*chars).get(*index + 1) {
+        if is_numeric(next_char) {
+            tokenize_numeric(chars, index)
+        } else {
+            Ok(Token::Operator(Operator::Sub))
+        }
+    } else {
+        Err(())
+    }
+}
+
+fn tokenize_numeric(chars: &Vec<char>, index: &mut usize) -> Result<Token, ()> {
+    let mut word = String::from(chars[*index]);
+    let mut j = index.clone() + 1;
+    'word: while let Some(next_char) = (*chars).get(j) {
+        if !is_numeric(next_char) {
+            j -= 1;
+            break 'word;
+        }
+
+        word.push(next_char.clone());
+        j += 1;
+    }
+
+    *index = j;
+    match word.parse::<i32>() {
+        Ok(n) => Ok(Token::Integer(n)),
+        Err(_) => match word.parse::<f64>() {
+            Ok(r) => Ok(Token::Real(r)),
+            Err(_) => Err(()),
+        },
+    }
+}
+
+fn is_numeric(c: &char) -> bool {
+    *c == '.' || ('0'..='9').contains(c)
 }
 
 #[cfg(test)]
@@ -78,13 +116,17 @@ mod tests {
 
     #[test]
     fn test_tokenize_integer_single() {
-        let tokens = tokenize("1").unwrap();
-        assert_eq!(1, tokens.len());
+        let inputs = [(1, "1"), (10, "10"), (-1, "-1"), (-10, "-10")];
 
-        if let Token::Integer(n) = tokens[0] {
-            assert_eq!(1, n);
-        } else {
-            assert!(false, "expected integer");
+        for (input_val, input_str) in inputs {
+            let tokens = tokenize(input_str).unwrap();
+            assert_eq!(1, tokens.len());
+
+            if let Token::Integer(n) = tokens[0] {
+                assert_eq!(input_val, n);
+            } else {
+                assert!(false, "expected integer");
+            }
         }
     }
 
@@ -110,7 +152,55 @@ mod tests {
         if let Token::Integer(n) = tokens[0] {
             assert_eq!(1234567890, n);
         } else {
-            assert!(false, "expected integer")
+            assert!(false, "expected integer");
+        }
+    }
+
+    #[test]
+    fn test_tokenize_real_single() {
+        let inputs = vec![
+            (0.1, "0.1"),
+            (1.1, "1.1"),
+            (0.1, ".1"),
+            (-1.1, "-1.1"),
+            (-0.1, "-.1"),
+        ];
+
+        for (input_val, input_str) in inputs {
+            let tokens = tokenize(input_str).unwrap();
+            assert_eq!(1, tokens.len());
+
+            if let Token::Real(r) = tokens[0] {
+                assert_eq!(input_val, r);
+            } else {
+                assert!(false, "expected real");
+            }
+        }
+    }
+
+    #[test]
+    fn test_tokenize_real_multiple() {
+        let tokens = tokenize("1.1 1.1 1.1").unwrap();
+        assert_eq!(3, tokens.len());
+
+        for token in tokens {
+            if let Token::Real(r) = token {
+                assert_eq!(1.1, r);
+            } else {
+                assert!(false, "expected real");
+            }
+        }
+    }
+
+    #[test]
+    fn test_tokenize_real_multidigit() {
+        let tokens = tokenize("3.1456").unwrap();
+        assert_eq!(1, tokens.len());
+
+        if let Token::Real(r) = tokens[0] {
+            assert_eq!(3.1456, r);
+        } else {
+            assert!(false, "expected real");
         }
     }
 
@@ -148,7 +238,7 @@ mod tests {
 
         assert!(
             if let Token::Operator(op) = &tokens[1] {
-                if let Operator::Subtract = op {
+                if let Operator::Sub = op {
                     true
                 } else {
                     false
@@ -161,7 +251,7 @@ mod tests {
 
         assert!(
             if let Token::Operator(op) = &tokens[2] {
-                if let Operator::Multiply = op {
+                if let Operator::Mul = op {
                     true
                 } else {
                     false
@@ -174,7 +264,7 @@ mod tests {
 
         assert!(
             if let Token::Operator(op) = &tokens[3] {
-                if let Operator::Divide = op {
+                if let Operator::Div = op {
                     true
                 } else {
                     false
