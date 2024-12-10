@@ -3,10 +3,8 @@ name: Unit Tests
 on: [push]
 
 jobs:
-  build:
-
+  test:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
       - name: Setup Go 1.23.x
