@@ -10,9 +10,9 @@ func Collect[T any](it iter.Seq[T]) []T {
 	return p
 }
 
-func Collect2[K, V any](it iter.Seq2[K, V]) ([]K, []V) {
-	leftElems := []K{}
-	rightElems := []V{}
+func Collect2[Left, Right any](it iter.Seq2[Left, Right]) ([]Left, []Right) {
+	leftElems := []Left{}
+	rightElems := []Right{}
 	for left, right := range it {
 		leftElems = append(leftElems, left)
 		rightElems = append(rightElems, right)
