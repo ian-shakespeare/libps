@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/ian-shakespeare/libps/pkg/utils"
+	"github.com/ian-shakespeare/libps/pkg/array"
 )
 
 func Scan(r io.Reader) ([]Token, error) {
@@ -81,8 +81,8 @@ wordBuilder:
 	}
 
 	t := INT_TOKEN
-	hasDecimal := utils.Contains(word, '.')
-	isRadix := utils.Contains(word, '#')
+	hasDecimal := array.Contains(word, '.')
+	isRadix := array.Contains(word, '#')
 	if isRadix && hasDecimal {
 		return Token{}, -1, errors.New("radix numeric may not contain a decimal mark")
 	} else if hasDecimal {
@@ -156,7 +156,7 @@ func scanName(buf []byte, startingIndex int) (Token, int, error) {
 
 	var i int
 	for i = startingIndex; i < len(buf); i++ {
-		if utils.Contains([]byte{'\x00', ' ', '\t', '\r', '\n', '\b', '\f'}, buf[i]) {
+		if array.Contains([]byte{'\x00', ' ', '\t', '\r', '\n', '\b', '\f'}, buf[i]) {
 			break
 		}
 		word = append(word, buf[i])

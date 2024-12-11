@@ -1,4 +1,4 @@
-package utils
+package array
 
 // Returns the index of the first element that is true on the condition.
 // Otherwise, returns -1.
