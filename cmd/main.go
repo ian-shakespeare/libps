@@ -2,8 +2,11 @@ package main
 
 import (
 	// "bufio"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+
 	// "os"
 	"strings"
 
@@ -19,9 +22,18 @@ func main() {
 		}
 	*/
 
-	tokens, err := interpret.Scan(strings.NewReader("(this is a\nmultline string)"))
-	if err != nil {
-		log.Fatal(err.Error())
+	scanner := interpret.NewScanner(strings.NewReader("(this is a string)"))
+
+	tokens := []interpret.Token{}
+
+	for token, err := range scanner.Tokens() {
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			log.Fatal(err.Error())
+		}
+		tokens = append(tokens, token)
 	}
 
 	fmt.Println(tokens)
