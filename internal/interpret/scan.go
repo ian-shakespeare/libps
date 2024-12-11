@@ -1,82 +1,102 @@
 package interpret
 
 import (
+	"bufio"
 	"errors"
 	"io"
+	"iter"
 
 	"github.com/ian-shakespeare/libps/pkg/array"
 )
 
-func Scan(r io.Reader) ([]Token, error) {
-	tokens := []Token{}
-
-	buf, err := io.ReadAll(r)
-	if err != nil {
-		return nil, err
-	}
-
-	for i := 0; i < len(buf); {
-		switch buf[i] {
-		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
-			i += 1
-		case '%':
-			newIndex, err := scanComment(buf, i)
-			if err != nil {
-				return nil, err
-			}
-			i = newIndex
-		case '.', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			token, newIndex, err := scanNumeric(buf, i)
-			if err != nil {
-				return nil, err
-			}
-			tokens = append(tokens, token)
-			i = newIndex
-		case '(':
-			token, newIndex, err := scanString(buf, i)
-			if err != nil {
-				return nil, err
-			}
-			tokens = append(tokens, token)
-			i = newIndex
-		default:
-			token, newIndex, err := scanName(buf, i)
-			if err != nil {
-				return nil, err
-			}
-			tokens = append(tokens, token)
-			i = newIndex
-		}
-	}
-
-	return tokens, nil
+type scanner struct {
+	reader *bufio.Reader
 }
 
-func scanComment(buf []byte, startingIndex int) (int, error) {
-	var i int
-	for i = startingIndex + 1; i < len(buf); i++ {
-		if buf[i] == '\n' || buf[i] == '\f' {
+func NewScanner(input io.Reader) *scanner {
+	return &scanner{
+		reader: bufio.NewReader(input),
+	}
+}
+
+func (s *scanner) NextToken() (Token, error) {
+	for {
+		b, err := s.reader.ReadByte()
+		if err != nil {
+			return Token{}, err
+		}
+		switch b {
+		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
+			continue
+		case '%':
+			if err := s.scanComment(); err != nil {
+				return Token{}, err
+			}
+			return s.NextToken()
+		case '.', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			token, err := s.scanNumeric(b)
+			return token, err
+		case '(':
+			token, err := s.scanString()
+			return token, err
+		default:
+			token, err := s.scanName(b)
+			return token, err
+		}
+	}
+}
+
+func (s *scanner) Tokens() iter.Seq2[Token, error] {
+	return func(yield func(Token, error) bool) {
+		for {
+			token, err := s.NextToken()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			if !yield(token, err) {
+				return
+			}
+		}
+	}
+}
+
+func (s *scanner) scanComment() error {
+	for {
+		b, err := s.reader.ReadByte()
+		if err != nil {
+			return err
+		}
+
+		if b == '\n' || b == '\f' {
 			break
 		}
 	}
 
-	return i, nil
+	return nil
 }
 
 // TODO: Support scientific notation and radix numbers.
-func scanNumeric(buf []byte, startingIndex int) (Token, int, error) {
-	word := []byte{buf[startingIndex]}
+func (s *scanner) scanNumeric(startingChars ...byte) (Token, error) {
+	word := startingChars
 
-	var i int
 wordBuilder:
-	for i = startingIndex + 1; i < len(buf); i++ {
-		switch buf[i] {
-		case '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			word = append(word, buf[i])
+	for {
+		b, err := s.reader.ReadByte()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return Token{}, err
+		}
+
+		switch b {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			break wordBuilder
+		case '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			word = append(word, b)
 		default:
-			return scanName(buf, startingIndex)
+			word = append(word, b)
+			return s.scanName(word...)
 		}
 	}
 
@@ -84,24 +104,31 @@ wordBuilder:
 	hasDecimal := array.Contains(word, '.')
 	isRadix := array.Contains(word, '#')
 	if isRadix && hasDecimal {
-		return Token{}, -1, errors.New("radix numeric may not contain a decimal mark")
+		return Token{}, errors.New("radix numeric may not contain a decimal mark")
 	} else if hasDecimal {
 		t = REAL_TOKEN
 	}
 
-	return Token{Type: t, Value: word}, i, nil
+	return Token{Type: t, Value: word}, nil
 }
 
 // TODO: Support \ddd
-func scanString(buf []byte, startingIndex int) (Token, int, error) {
-	word := []byte{}
+func (s *scanner) scanString(startingChars ...byte) (Token, error) {
+	word := startingChars
 
 	activeParens := 0
 
-	var i int
 wordBuilder:
-	for i = startingIndex + 1; i < len(buf); i++ {
-		switch buf[i] {
+	for {
+		b, err := s.reader.ReadByte()
+		if errors.Is(err, io.EOF) {
+			return Token{}, errors.New("received unexpected end of file")
+		}
+		if err != nil {
+			return Token{}, err
+		}
+
+		switch b {
 		case '(':
 			word = append(word, '(')
 			activeParens++
@@ -112,10 +139,11 @@ wordBuilder:
 			word = append(word, ')')
 			activeParens--
 		case '\\':
-			if i+1 >= len(buf) {
-				return Token{}, -1, errors.New("received unexpected EOF")
+			afterSlash, err := s.reader.ReadByte()
+			if err != nil {
+				return Token{}, err
 			}
-			switch buf[i+1] {
+			switch afterSlash {
 			case 'n':
 				word = append(word, '\n')
 			case 'r':
@@ -134,33 +162,41 @@ wordBuilder:
 				word = append(word, ')')
 			case '\n':
 			case '\r':
-				if i+2 < len(buf) && buf[i+2] == '\n' {
-					i++
+				afterCrlf, err := s.reader.Peek(1)
+				if err != nil {
+					return Token{}, err
+				}
+				if afterCrlf[0] == '\n' {
+					_, _ = s.reader.ReadByte()
 				}
 			default:
+				break
 			}
-			i++
 		default:
-			word = append(word, buf[i])
+			word = append(word, b)
 		}
 	}
-	if i >= len(buf) {
-		return Token{}, -1, errors.New("received unexpected EOF")
-	}
 
-	return Token{Type: STRING_TOKEN, Value: word}, i + 1, nil
+	return Token{Type: STRING_TOKEN, Value: word}, nil
 }
 
-func scanName(buf []byte, startingIndex int) (Token, int, error) {
-	word := []byte{}
+func (s *scanner) scanName(startingChars ...byte) (Token, error) {
+	word := startingChars
 
-	var i int
-	for i = startingIndex; i < len(buf); i++ {
-		if array.Contains([]byte{'\x00', ' ', '\t', '\r', '\n', '\b', '\f'}, buf[i]) {
+	for {
+		b, err := s.reader.ReadByte()
+		if errors.Is(err, io.EOF) {
 			break
 		}
-		word = append(word, buf[i])
+		if err != nil {
+			return Token{}, err
+		}
+
+		if array.Contains([]byte{'\x00', ' ', '\t', '\r', '\n', '\b', '\f'}, b) {
+			break
+		}
+		word = append(word, b)
 	}
 
-	return Token{Type: NAME_TOKEN, Value: word}, i, nil
+	return Token{Type: NAME_TOKEN, Value: word}, nil
 }

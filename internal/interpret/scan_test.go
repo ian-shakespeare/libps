@@ -1,10 +1,13 @@
 package interpret_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/ian-shakespeare/libps/internal/interpret"
+	"github.com/ian-shakespeare/libps/pkg/array"
+	"github.com/ian-shakespeare/libps/pkg/iterator"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -12,9 +15,9 @@ func TestScan(t *testing.T) {
 	t.Parallel()
 
 	t.Run("comment", func(t *testing.T) {
-		tokens, err := interpret.Scan(strings.NewReader("% this is a comment"))
-		assert.NoError(t, err)
-		assert.Empty(t, tokens)
+		s := interpret.NewScanner(strings.NewReader("% this is a comment"))
+		_, err := s.NextToken()
+		assert.ErrorIs(t, io.EOF, err)
 	})
 
 	invalidNumerics := []struct {
@@ -29,10 +32,10 @@ func TestScan(t *testing.T) {
 		t.Run(input.name, func(t *testing.T) {
 			t.Parallel()
 
-			tokens, err := interpret.Scan(strings.NewReader(input.value))
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.NextToken()
 			assert.NoError(t, err)
-			assert.Len(t, tokens, 1)
-			assert.Equal(t, interpret.NAME_TOKEN, tokens[0].Type)
+			assert.Equal(t, interpret.NAME_TOKEN, token.Type)
 		})
 	}
 
@@ -53,12 +56,10 @@ func TestScan(t *testing.T) {
 		t.Run(input.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := strings.NewReader(input.value)
-
-			tokens, err := interpret.Scan(r)
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.NextToken()
 			assert.NoError(t, err)
-			assert.Len(t, tokens, 1)
-			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []byte(input.value)}, tokens[0])
+			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []byte(input.value)}, token)
 		})
 	}
 
@@ -66,9 +67,10 @@ func TestScan(t *testing.T) {
 		t.Parallel()
 
 		for _, input := range []string{"(this is a string", "(this is a string \\)"} {
-			r := strings.NewReader(input)
-			_, err := interpret.Scan(r)
+			s := interpret.NewScanner(strings.NewReader(input))
+			_, err := s.NextToken()
 			assert.Error(t, err)
+			assert.NotErrorIs(t, io.EOF, err)
 		}
 	})
 
@@ -86,12 +88,10 @@ func TestScan(t *testing.T) {
 		t.Run(input.name, func(t *testing.T) {
 			t.Parallel()
 
-			r := strings.NewReader(input.value)
-
-			tokens, err := interpret.Scan(r)
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.NextToken()
 			assert.NoError(t, err)
-			assert.Len(t, tokens, 1)
-			assert.Equal(t, input.expect, string(tokens[0].Value))
+			assert.Equal(t, input.expect, string(token.Value))
 		})
 	}
 
@@ -101,12 +101,10 @@ func TestScan(t *testing.T) {
 		inputs := []string{"abc", "Offset", "$$", "23A", "13-456", "a.b", "$MyDict", "@pattern"}
 
 		for _, input := range inputs {
-			r := strings.NewReader(input)
-
-			tokens, err := interpret.Scan(r)
+			s := interpret.NewScanner(strings.NewReader(input))
+			token, err := s.NextToken()
 			assert.NoError(t, err)
-			assert.Len(t, tokens, 1)
-			assert.Equal(t, string(input), string(tokens[0].Value))
+			assert.Equal(t, string(input), string(token.Value))
 		}
 	})
 
@@ -141,8 +139,12 @@ myNegativeReal -3.1456
 			{Type: interpret.REAL_TOKEN, Value: []byte("-3.1456")},
 		}
 
-		tokens, err := interpret.Scan(strings.NewReader(input))
-		assert.NoError(t, err)
+		s := interpret.NewScanner(strings.NewReader(input))
+		tokens, errs := iterator.Collect2(s.Tokens())
+		errorIndex := array.Some(errs, func(err error) bool {
+			return err != nil
+		})
+		assert.Equal(t, -1, errorIndex, "expected no errors, received error at index %d", errorIndex)
 		assert.Len(t, tokens, len(expect))
 		assert.Equal(t, expect, tokens)
 
