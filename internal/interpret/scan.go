@@ -28,7 +28,9 @@ func (s *scanner) NextToken() (Token, error) {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			continue
 		case '%':
-			s.scanComment()
+			if err := s.scanComment(); err != nil {
+				return Token{}, err
+			}
 			return s.NextToken()
 		case '.', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			token, err := s.scanNumeric(b)
@@ -172,7 +174,9 @@ wordBuilder:
 					return Token{}, err
 				}
 				if afterCrlf != '\n' {
-					s.input.Seek(-1, io.SeekCurrent)
+					if _, err := s.input.Seek(-1, io.SeekCurrent); err != nil {
+						return Token{}, err
+					}
 				}
 			default:
 				break
