@@ -1,6 +1,7 @@
 package interpret
 
 import (
+	"bufio"
 	"errors"
 	"io"
 	"iter"
@@ -9,18 +10,18 @@ import (
 )
 
 type scanner struct {
-	input io.ReadSeeker
+	reader *bufio.Reader
 }
 
-func NewScanner(input io.ReadSeeker) *scanner {
+func NewScanner(input io.Reader) *scanner {
 	return &scanner{
-		input,
+		reader: bufio.NewReader(input),
 	}
 }
 
 func (s *scanner) NextToken() (Token, error) {
 	for {
-		b, err := s.getNextCharacter()
+		b, err := s.reader.ReadByte()
 		if err != nil {
 			return Token{}, err
 		}
@@ -59,17 +60,9 @@ func (s *scanner) Tokens() iter.Seq2[Token, error] {
 	}
 }
 
-func (s *scanner) getNextCharacter() (byte, error) {
-	b := make([]byte, 1)
-	if _, err := s.input.Read(b); err != nil {
-		return 0, err
-	}
-	return b[0], nil
-}
-
 func (s *scanner) scanComment() error {
 	for {
-		b, err := s.getNextCharacter()
+		b, err := s.reader.ReadByte()
 		if err != nil {
 			return err
 		}
@@ -88,7 +81,7 @@ func (s *scanner) scanNumeric(startingChars ...byte) (Token, error) {
 
 wordBuilder:
 	for {
-		b, err := s.getNextCharacter()
+		b, err := s.reader.ReadByte()
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -127,7 +120,7 @@ func (s *scanner) scanString(startingChars ...byte) (Token, error) {
 
 wordBuilder:
 	for {
-		b, err := s.getNextCharacter()
+		b, err := s.reader.ReadByte()
 		if errors.Is(err, io.EOF) {
 			return Token{}, errors.New("received unexpected end of file")
 		}
@@ -146,7 +139,7 @@ wordBuilder:
 			word = append(word, ')')
 			activeParens--
 		case '\\':
-			afterSlash, err := s.getNextCharacter()
+			afterSlash, err := s.reader.ReadByte()
 			if err != nil {
 				return Token{}, err
 			}
@@ -169,14 +162,12 @@ wordBuilder:
 				word = append(word, ')')
 			case '\n':
 			case '\r':
-				afterCrlf, err := s.getNextCharacter()
+				afterCrlf, err := s.reader.Peek(1)
 				if err != nil {
 					return Token{}, err
 				}
-				if afterCrlf != '\n' {
-					if _, err := s.input.Seek(-1, io.SeekCurrent); err != nil {
-						return Token{}, err
-					}
+				if afterCrlf[0] == '\n' {
+					_, _ = s.reader.ReadByte()
 				}
 			default:
 				break
@@ -193,7 +184,7 @@ func (s *scanner) scanName(startingChars ...byte) (Token, error) {
 	word := startingChars
 
 	for {
-		b, err := s.getNextCharacter()
+		b, err := s.reader.ReadByte()
 		if errors.Is(err, io.EOF) {
 			break
 		}
