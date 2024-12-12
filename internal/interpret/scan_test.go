@@ -141,10 +141,9 @@ myNegativeReal -3.1456
 
 		s := interpret.NewScanner(strings.NewReader(input))
 		tokens, errs := iterator.Collect2(s.Tokens())
-		errorIndex := array.Some(errs, func(err error) bool {
+		assert.False(t, array.Some(errs, func(err error) bool {
 			return err != nil
-		})
-		assert.Equal(t, -1, errorIndex, "expected no errors, received error at index %d", errorIndex)
+		}))
 		assert.Len(t, tokens, len(expect))
 		assert.Equal(t, expect, tokens)
 
