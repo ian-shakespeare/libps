@@ -33,15 +33,14 @@ func (s *scanner) NextToken() (Token, error) {
 				return Token{}, err
 			}
 			return s.NextToken()
-		case '.', '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			token, err := s.scanNumeric(b)
-			return token, err
+		case '.':
+			return s.scanReal(b)
+		case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			return s.scanNumeric(b)
 		case '(':
-			token, err := s.scanString()
-			return token, err
+			return s.scanString()
 		default:
-			token, err := s.scanName(b)
-			return token, err
+			return s.scanName(b)
 		}
 	}
 }
@@ -75,7 +74,6 @@ func (s *scanner) scanComment() error {
 	return nil
 }
 
-// TODO: Support scientific notation and radix numbers.
 func (s *scanner) scanNumeric(startingChars ...byte) (Token, error) {
 	word := startingChars
 
@@ -92,7 +90,61 @@ wordBuilder:
 		switch b {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			break wordBuilder
-		case '.', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+			word = append(word, b)
+		case '.':
+			word = append(word, b)
+			return s.scanReal(word...)
+		case '#':
+			if array.Contains(word, '-') {
+				return Token{}, errors.New("radix number cannot have a negative base")
+			}
+			word = append(word, b)
+			return s.scanRadix(word...)
+		default:
+			word = append(word, b)
+			return s.scanName(word...)
+		}
+	}
+
+	return Token{Type: INT_TOKEN, Value: word}, nil
+}
+
+func (s *scanner) scanReal(startingChars ...byte) (Token, error) {
+	word := startingChars
+
+wordBuilder:
+	for {
+		hasTrailingExponent := word[len(word)-1] == 'e' || word[len(word)-1] == 'E'
+
+		b, err := s.reader.ReadByte()
+		if errors.Is(err, io.EOF) {
+			if hasTrailingExponent {
+				return Token{}, errors.New("received unexpected end of real number")
+			}
+			break
+		}
+		if err != nil {
+			return Token{}, err
+		}
+
+		switch b {
+		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
+			if hasTrailingExponent {
+				return Token{}, errors.New("received unexpected end of real number")
+			}
+			break wordBuilder
+		case 'e', 'E':
+			if array.Contains(word, 'e') || array.Contains(word, 'E') {
+				return s.scanName(word...)
+			}
+			word = append(word, b)
+		case '-':
+			if !hasTrailingExponent {
+				return s.scanName(word...)
+			}
+			word = append(word, b)
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			word = append(word, b)
 		default:
 			word = append(word, b)
@@ -100,16 +152,42 @@ wordBuilder:
 		}
 	}
 
-	t := INT_TOKEN
-	hasDecimal := array.Contains(word, '.')
-	isRadix := array.Contains(word, '#')
-	if isRadix && hasDecimal {
-		return Token{}, errors.New("radix numeric may not contain a decimal mark")
-	} else if hasDecimal {
-		t = REAL_TOKEN
+	return Token{Type: REAL_TOKEN, Value: word}, nil
+}
+
+func (s *scanner) scanRadix(startingChars ...byte) (Token, error) {
+	word := startingChars
+
+wordBuilder:
+	for {
+		hasTrailingHash := word[len(word)-1] == '#'
+
+		b, err := s.reader.ReadByte()
+		if errors.Is(err, io.EOF) {
+			if hasTrailingHash {
+				return Token{}, errors.New("received unexpected end of radix number")
+			}
+			break
+		}
+		if err != nil {
+			return Token{}, err
+		}
+
+		switch b {
+		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
+			if hasTrailingHash {
+				return Token{}, errors.New("received unexpected end of radix number")
+			}
+			break wordBuilder
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z':
+			word = append(word, b)
+		default:
+			word = append(word, b)
+			return s.scanName(word...)
+		}
 	}
 
-	return Token{Type: t, Value: word}, nil
+	return Token{Type: RADIX_TOKEN, Value: word}, nil
 }
 
 // TODO: Support \ddd
