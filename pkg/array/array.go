@@ -2,7 +2,7 @@ package array
 
 // Returns the index of the first element that is true on the condition.
 // Otherwise, returns -1.
-func Filter[T any](arr []T, cond func(T) bool) int {
+func Find[T any](arr []T, cond func(T) bool) int {
 	for i := 0; i < len(arr); i++ {
 		if cond(arr[i]) {
 			return i
@@ -13,7 +13,7 @@ func Filter[T any](arr []T, cond func(T) bool) int {
 
 // Returns true if an element of the given array matches the condition.
 func Some[T any](arr []T, cond func(T) bool) bool {
-	index := Filter(arr, cond)
+	index := Find(arr, cond)
 	return index > -1
 }
 
