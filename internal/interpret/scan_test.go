@@ -50,6 +50,14 @@ func TestScan(t *testing.T) {
 		{"real", ".1", interpret.REAL_TOKEN},
 		{"realNegative", "-.1", interpret.REAL_TOKEN},
 		{"realMultidigit", "1.234567890", interpret.REAL_TOKEN},
+		{"realScientific", "1.2E7", interpret.REAL_TOKEN},
+		{"realScientificLowerCase", "1.2e7", interpret.REAL_TOKEN},
+		{"realScientificNegative", "-1.2e7", interpret.REAL_TOKEN},
+		{"realScientificFraction", "1.2e-7", interpret.REAL_TOKEN},
+		{"realScientificNegativeFraction", "-1.2e-7", interpret.REAL_TOKEN},
+		{"radixBase2", "2#1000", interpret.RADIX_TOKEN},
+		{"radixBase8", "8#1777", interpret.RADIX_TOKEN},
+		{"radixBase16", "16#FFFE", interpret.RADIX_TOKEN},
 	}
 
 	for _, input := range validNumerics {
