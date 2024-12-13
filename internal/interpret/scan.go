@@ -20,6 +20,8 @@ func NewScanner(input io.Reader) *scanner {
 }
 
 func (s *scanner) NextToken() (Token, error) {
+	token := Token{Type: UNKNOWN_TOKEN, Value: []rune{}}
+
 	for {
 		char, _, err := s.reader.ReadRune()
 		if err != nil {
@@ -29,18 +31,25 @@ func (s *scanner) NextToken() (Token, error) {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			continue
 		case '%':
-			if err := s.scanComment(); err != nil {
+			if err := s.readComment(); err != nil {
 				return Token{}, err
 			}
 			return s.NextToken()
 		case '.':
-			return s.scanReal(char)
+			token.Append(char)
+			err = s.readReal(&token)
+			return token, err
 		case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			return s.scanNumeric(char)
+			token.Append(char)
+			err = s.readNumeric(&token)
+			return token, err
 		case '(':
-			return s.scanString()
+			err = s.readString(&token)
+			return token, err
 		default:
-			return s.scanName(char)
+			token.Append(char)
+			err = s.readName(&token)
+			return token, err
 		}
 	}
 }
@@ -59,7 +68,7 @@ func (s *scanner) Tokens() iter.Seq2[Token, error] {
 	}
 }
 
-func (s *scanner) scanComment() error {
+func (s *scanner) readComment() error {
 	for {
 		b, err := s.reader.ReadByte()
 		if err != nil {
@@ -74,8 +83,8 @@ func (s *scanner) scanComment() error {
 	return nil
 }
 
-func (s *scanner) scanNumeric(startingChars ...rune) (Token, error) {
-	word := startingChars
+func (s *scanner) readNumeric(token *Token) error {
+	token.Type = INT_TOKEN
 
 wordBuilder:
 	for {
@@ -84,165 +93,164 @@ wordBuilder:
 			break
 		}
 		if err != nil {
-			return Token{}, err
+			return err
 		}
 
 		switch char {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			break wordBuilder
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			word = append(word, char)
+			token.Append(char)
 		case '.':
-			word = append(word, char)
-			return s.scanReal(word...)
+			token.Append(char)
+			return s.readReal(token)
 		case '#':
-			if word[0] == '-' {
-				return Token{}, errors.New("radix number cannot have a negative base")
+			if token.Value[0] == '-' {
+				return errors.New("radix number cannot have a negative base")
 			}
-			word = append(word, char)
-			return s.scanRadix(word...)
+			token.Append(char)
+			return s.readRadix(token)
 		default:
-			word = append(word, char)
-			return s.scanName(word...)
+			token.Append(char)
+			return s.readName(token)
 		}
 	}
 
-	return Token{Type: INT_TOKEN, Value: word}, nil
+	return nil
 }
 
-func (s *scanner) scanReal(startingChars ...rune) (Token, error) {
-	word := startingChars
+func (s *scanner) readReal(token *Token) error {
+	token.Type = REAL_TOKEN
 
 wordBuilder:
 	for {
-		hasTrailingExponent := word[len(word)-1] == 'e' || word[len(word)-1] == 'E'
+		hasTrailingExponent := token.Value[len(token.Value)-1] == 'e' || token.Value[len(token.Value)-1] == 'E'
 
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
 			if hasTrailingExponent {
-				return Token{}, errors.New("received unexpected end of real number")
+				return errors.New("received unexpected end of real number")
 			}
 			break
 		}
 		if err != nil {
-			return Token{}, err
+			return err
 		}
 
 		switch char {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			if hasTrailingExponent {
-				return Token{}, errors.New("received unexpected end of real number")
+				return errors.New("received unexpected end of real number")
 			}
 			break wordBuilder
 		case 'e', 'E':
-			if array.Contains(word, 'e') || array.Contains(word, 'E') {
-				return s.scanName(word...)
+			if array.Contains(token.Value, 'e') || array.Contains(token.Value, 'E') {
+				return s.readName(token)
 			}
-			word = append(word, char)
+			token.Append(char)
 		case '-':
 			if !hasTrailingExponent {
-				return s.scanName(word...)
+				return s.readName(token)
 			}
-			word = append(word, char)
+			token.Append(char)
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
-			word = append(word, char)
+			token.Append(char)
 		default:
-			word = append(word, char)
-			return s.scanName(word...)
+			token.Append(char)
+			return s.readName(token)
 		}
 	}
 
-	return Token{Type: REAL_TOKEN, Value: word}, nil
+	return nil
 }
 
-func (s *scanner) scanRadix(startingChars ...rune) (Token, error) {
-	word := startingChars
+func (s *scanner) readRadix(token *Token) error {
+	token.Type = RADIX_TOKEN
 
 wordBuilder:
 	for {
-		hasTrailingHash := word[len(word)-1] == '#'
+		hasTrailingHash := token.Value[len(token.Value)-1] == '#'
 
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
 			if hasTrailingHash {
-				return Token{}, errors.New("received unexpected end of radix number")
+				return errors.New("received unexpected end of radix number")
 			}
 			break
 		}
 		if err != nil {
-			return Token{}, err
+			return err
 		}
 
 		switch char {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			if hasTrailingHash {
-				return Token{}, errors.New("received unexpected end of radix number")
+				return errors.New("received unexpected end of radix number")
 			}
 			break wordBuilder
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z':
-			word = append(word, char)
+			token.Append(char)
 		default:
-			word = append(word, char)
-			return s.scanName(word...)
+			token.Append(char)
+			return s.readName(token)
 		}
 	}
 
-	return Token{Type: RADIX_TOKEN, Value: word}, nil
+	return nil
 }
 
 // TODO: Support \ddd
-func (s *scanner) scanString(startingChars ...rune) (Token, error) {
-	word := startingChars
-
+func (s *scanner) readString(token *Token) error {
+	token.Type = STRING_TOKEN
 	activeParens := 0
 
 wordBuilder:
 	for {
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
-			return Token{}, errors.New("received unexpected end of file")
+			return errors.New("received unexpected end of file")
 		}
 		if err != nil {
-			return Token{}, err
+			return err
 		}
 
 		switch char {
 		case '(':
-			word = append(word, '(')
+			token.Append('(')
 			activeParens++
 		case ')':
 			if activeParens < 1 {
 				break wordBuilder
 			}
-			word = append(word, ')')
+			token.Append(')')
 			activeParens--
 		case '\\':
 			afterSlash, err := s.reader.ReadByte()
 			if err != nil {
-				return Token{}, err
+				return err
 			}
 			switch afterSlash {
 			case 'n':
-				word = append(word, '\n')
+				token.Append('\n')
 			case 'r':
-				word = append(word, '\r')
+				token.Append('\r')
 			case 't':
-				word = append(word, '\t')
+				token.Append('\t')
 			case 'b':
-				word = append(word, '\b')
+				token.Append('\b')
 			case 'f':
-				word = append(word, '\f')
+				token.Append('\f')
 			case '\\':
-				word = append(word, '\\')
+				token.Append('\\')
 			case '(':
-				word = append(word, '(')
+				token.Append('(')
 			case ')':
-				word = append(word, ')')
+				token.Append(')')
 			case '\n':
 			case '\r':
 				afterCrlf, err := s.reader.Peek(1)
 				if err != nil {
-					return Token{}, err
+					return err
 				}
 				if afterCrlf[0] == '\n' {
 					_, _ = s.reader.ReadByte()
@@ -251,15 +259,15 @@ wordBuilder:
 				break
 			}
 		default:
-			word = append(word, char)
+			token.Append(char)
 		}
 	}
 
-	return Token{Type: STRING_TOKEN, Value: word}, nil
+	return nil
 }
 
-func (s *scanner) scanName(startingChars ...rune) (Token, error) {
-	word := startingChars
+func (s *scanner) readName(token *Token) error {
+	token.Type = NAME_TOKEN
 
 	for {
 		char, _, err := s.reader.ReadRune()
@@ -267,14 +275,14 @@ func (s *scanner) scanName(startingChars ...rune) (Token, error) {
 			break
 		}
 		if err != nil {
-			return Token{}, err
+			return err
 		}
 
 		if array.Contains([]rune{'\x00', ' ', '\t', '\r', '\n', '\b', '\f'}, char) {
 			break
 		}
-		word = append(word, char)
+		token.Append(char)
 	}
 
-	return Token{Type: NAME_TOKEN, Value: word}, nil
+	return nil
 }
