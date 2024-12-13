@@ -96,7 +96,7 @@ wordBuilder:
 			word = append(word, b)
 			return s.scanReal(word...)
 		case '#':
-			if array.Contains(word, '-') {
+			if word[0] == '-' {
 				return Token{}, errors.New("radix number cannot have a negative base")
 			}
 			word = append(word, b)
