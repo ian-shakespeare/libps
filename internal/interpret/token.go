@@ -12,5 +12,5 @@ const (
 
 type Token struct {
 	Type  TokenType
-	Value []byte
+	Value []rune
 }

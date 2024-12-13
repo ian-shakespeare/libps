@@ -67,7 +67,7 @@ func TestScan(t *testing.T) {
 			s := interpret.NewScanner(strings.NewReader(input.value))
 			token, err := s.NextToken()
 			assert.NoError(t, err)
-			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []byte(input.value)}, token)
+			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []rune(input.value)}, token)
 		})
 	}
 
@@ -133,18 +133,18 @@ myNegativeReal -3.1456
     `
 
 		expect := []interpret.Token{
-			{Type: interpret.NAME_TOKEN, Value: []byte("myStr")},
-			{Type: interpret.STRING_TOKEN, Value: []byte("i have a string right here")},
-			{Type: interpret.NAME_TOKEN, Value: []byte("myOtherStr")},
-			{Type: interpret.STRING_TOKEN, Value: []byte("and\nanother right here")},
-			{Type: interpret.NAME_TOKEN, Value: []byte("myInt")},
-			{Type: interpret.INT_TOKEN, Value: []byte("1234567890")},
-			{Type: interpret.NAME_TOKEN, Value: []byte("myNegativeInt")},
-			{Type: interpret.INT_TOKEN, Value: []byte("-1234567890")},
-			{Type: interpret.NAME_TOKEN, Value: []byte("myReal")},
-			{Type: interpret.REAL_TOKEN, Value: []byte("3.1456")},
-			{Type: interpret.NAME_TOKEN, Value: []byte("myNegativeReal")},
-			{Type: interpret.REAL_TOKEN, Value: []byte("-3.1456")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myStr")},
+			{Type: interpret.STRING_TOKEN, Value: []rune("i have a string right here")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myOtherStr")},
+			{Type: interpret.STRING_TOKEN, Value: []rune("and\nanother right here")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myInt")},
+			{Type: interpret.INT_TOKEN, Value: []rune("1234567890")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myNegativeInt")},
+			{Type: interpret.INT_TOKEN, Value: []rune("-1234567890")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myReal")},
+			{Type: interpret.REAL_TOKEN, Value: []rune("3.1456")},
+			{Type: interpret.NAME_TOKEN, Value: []rune("myNegativeReal")},
+			{Type: interpret.REAL_TOKEN, Value: []rune("-3.1456")},
 		}
 
 		s := interpret.NewScanner(strings.NewReader(input))
