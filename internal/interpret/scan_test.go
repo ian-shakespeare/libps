@@ -103,6 +103,44 @@ func TestScan(t *testing.T) {
 		})
 	}
 
+	escapedStrings := []struct {
+		name   string
+		value  string
+		expect string
+	}{
+		{"stringNewline", "(\\n)", "\n"},
+		{"stringCrlf", "(\\r)", "\r"},
+		{"stringTab", "(\\t)", "\t"},
+		{"stringBackspace", "(\\b)", "\b"},
+		{"stringForm", "(\\f)", "\f"},
+		{"stringSlash", "(\\\\)", "\\"},
+		{"stringLParen", "(\\()", "("},
+		{"stringRParen", "(\\))", ")"},
+		{"stringIgnoreNewLine", "(\\\n)", ""},
+		{"stringIgnoreCrlf", "(\\\r)", ""},
+		{"stringIgnoreCrlfNewLine", "(\\\r\n)", ""},
+	}
+
+	for _, input := range escapedStrings {
+		t.Run(input.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.NextToken()
+			assert.NoError(t, err)
+			assert.Equal(t, []rune(input.expect), token.Value)
+		})
+	}
+
+	t.Run("stringOctal", func(t *testing.T) {
+		t.Parallel()
+
+		s := interpret.NewScanner(strings.NewReader("(\\777)"))
+		token, err := s.NextToken()
+		assert.NoError(t, err)
+		assert.Equal(t, 511, token.Value[0])
+	})
+
 	t.Run("name", func(t *testing.T) {
 		t.Parallel()
 

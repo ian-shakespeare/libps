@@ -1,21 +1,23 @@
 package interpret
 
 import (
-	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
+	"strconv"
 
 	"github.com/ian-shakespeare/libps/pkg/array"
+	"github.com/ian-shakespeare/libps/pkg/runes"
 )
 
 type scanner struct {
-	reader *bufio.Reader
+	reader *runes.Reader
 }
 
 func NewScanner(input io.Reader) *scanner {
 	return &scanner{
-		reader: bufio.NewReader(input),
+		reader: runes.NewReader(input),
 	}
 }
 
@@ -225,7 +227,7 @@ wordBuilder:
 			token.Append(')')
 			activeParens--
 		case '\\':
-			afterSlash, err := s.reader.ReadByte()
+			afterSlash, _, err := s.reader.ReadRune()
 			if err != nil {
 				return err
 			}
@@ -247,14 +249,27 @@ wordBuilder:
 			case ')':
 				token.Append(')')
 			case '\n':
+				continue wordBuilder
 			case '\r':
-				afterCrlf, err := s.reader.Peek(1)
+				afterCrlf, err := s.reader.PeekRunes(1)
 				if err != nil {
 					return err
 				}
 				if afterCrlf[0] == '\n' {
 					_, _ = s.reader.ReadByte()
 				}
+			case '0', '1', '2', '3', '4', '5', '6', '7':
+				octal := []rune{char}
+				nextDigits, err := s.reader.PeekRunes(2)
+				if err != nil {
+					return nil
+				}
+				octal = append(octal, nextDigits...)
+				value, err := strconv.ParseInt(string(octal), 8, 32)
+				if err != nil {
+					return fmt.Errorf("unrecognized escape sequence: \\%s", string(octal))
+				}
+				token.Append(rune(value))
 			default:
 				break
 			}
