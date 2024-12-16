@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"iter"
 	"strconv"
 
 	"github.com/ian-shakespeare/libps/pkg/array"
@@ -21,7 +20,7 @@ func NewScanner(input io.Reader) *scanner {
 	}
 }
 
-func (s *scanner) NextToken() (Token, error) {
+func (s *scanner) ReadToken() (Token, error) {
 	token := Token{Type: UNKNOWN_TOKEN, Value: []rune{}}
 
 	for {
@@ -36,7 +35,7 @@ func (s *scanner) NextToken() (Token, error) {
 			if err := s.readComment(); err != nil {
 				return Token{}, err
 			}
-			return s.NextToken()
+			return s.ReadToken()
 		case '.':
 			token.Append(char)
 			err = s.readReal(&token)
@@ -52,20 +51,6 @@ func (s *scanner) NextToken() (Token, error) {
 			token.Append(char)
 			err = s.readName(&token)
 			return token, err
-		}
-	}
-}
-
-func (s *scanner) Tokens() iter.Seq2[Token, error] {
-	return func(yield func(Token, error) bool) {
-		for {
-			token, err := s.NextToken()
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			if !yield(token, err) {
-				return
-			}
 		}
 	}
 }
@@ -259,7 +244,7 @@ wordBuilder:
 					_, _ = s.reader.ReadByte()
 				}
 			case '0', '1', '2', '3', '4', '5', '6', '7':
-				octal := []rune{char}
+				octal := []rune{afterSlash}
 				nextDigits, err := s.reader.PeekRunes(2)
 				if err != nil {
 					return nil
@@ -267,7 +252,7 @@ wordBuilder:
 				octal = append(octal, nextDigits...)
 				value, err := strconv.ParseInt(string(octal), 8, 32)
 				if err != nil {
-					return fmt.Errorf("unrecognized escape sequence: \\%s", string(octal))
+					return fmt.Errorf("unrecognized escape sequence: %s", string(octal))
 				}
 				token.Append(rune(value))
 			default:

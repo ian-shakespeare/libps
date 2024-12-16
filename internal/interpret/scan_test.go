@@ -1,13 +1,12 @@
 package interpret_test
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/ian-shakespeare/libps/internal/interpret"
-	"github.com/ian-shakespeare/libps/pkg/array"
-	"github.com/ian-shakespeare/libps/pkg/iterator"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,7 +15,7 @@ func TestScan(t *testing.T) {
 
 	t.Run("comment", func(t *testing.T) {
 		s := interpret.NewScanner(strings.NewReader("% this is a comment"))
-		_, err := s.NextToken()
+		_, err := s.ReadToken()
 		assert.ErrorIs(t, io.EOF, err)
 	})
 
@@ -33,7 +32,7 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, interpret.NAME_TOKEN, token.Type)
 		})
@@ -65,7 +64,7 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []rune(input.value)}, token)
 		})
@@ -76,7 +75,7 @@ func TestScan(t *testing.T) {
 
 		for _, input := range []string{"(this is a string", "(this is a string \\)"} {
 			s := interpret.NewScanner(strings.NewReader(input))
-			_, err := s.NextToken()
+			_, err := s.ReadToken()
 			assert.Error(t, err)
 			assert.NotErrorIs(t, io.EOF, err)
 		}
@@ -97,7 +96,7 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, input.expect, string(token.Value))
 		})
@@ -126,20 +125,31 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, []rune(input.expect), token.Value)
 		})
 	}
 
-	t.Run("stringOctal", func(t *testing.T) {
-		t.Parallel()
+	octals := []struct {
+		name   string
+		value  string
+		expect int32
+	}{
+		{"stringOctalMin", "(\\000)", 0},
+		{"stringOctalMax", "(\\777)", 511},
+	}
 
-		s := interpret.NewScanner(strings.NewReader("(\\777)"))
-		token, err := s.NextToken()
-		assert.NoError(t, err)
-		assert.Equal(t, 511, token.Value[0])
-	})
+	for _, input := range octals {
+		t.Run(input.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.ReadToken()
+			assert.NoError(t, err)
+			assert.Equal(t, input.expect, token.Value[0])
+		})
+	}
 
 	t.Run("name", func(t *testing.T) {
 		t.Parallel()
@@ -148,7 +158,7 @@ func TestScan(t *testing.T) {
 
 		for _, input := range inputs {
 			s := interpret.NewScanner(strings.NewReader(input))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, string(input), string(token.Value))
 		}
@@ -186,13 +196,18 @@ myNegativeReal -3.1456
 		}
 
 		s := interpret.NewScanner(strings.NewReader(input))
-		tokens, errs := iterator.Collect2(s.Tokens())
-		assert.False(t, array.Some(errs, func(err error) bool {
-			return err != nil
-		}))
-		assert.Len(t, tokens, len(expect))
-		assert.Equal(t, expect, tokens)
+		received := make([]interpret.Token, 0, len(expect))
 
-		// t.Log(tokens)
+		for {
+			token, err := s.ReadToken()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			assert.NoError(t, err)
+			received = append(received, token)
+		}
+
+		assert.Len(t, received, len(expect))
+		assert.Equal(t, expect, received)
 	})
 }
