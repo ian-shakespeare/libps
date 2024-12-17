@@ -1,8 +1,8 @@
 package interpret
 
 import (
+	"encoding/ascii85"
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 
@@ -45,7 +45,24 @@ func (s *scanner) ReadToken() (Token, error) {
 			err = s.readNumeric(&token)
 			return token, err
 		case '(':
-			err = s.readString(&token)
+			err = s.readLiteralString(&token)
+			return token, err
+		case '<':
+			next, err := s.reader.PeekRunes(1)
+			if err != nil {
+				return Token{}, err
+			}
+
+			if next[0] == '~' {
+				_, _, err = s.reader.ReadRune()
+				if err != nil {
+					return Token{}, err
+				}
+
+				err = s.readBase85String(&token)
+			} else {
+				err = s.readHexString(&token)
+			}
 			return token, err
 		default:
 			token.Append(char)
@@ -93,7 +110,7 @@ wordBuilder:
 			return s.readReal(token)
 		case '#':
 			if token.Value[0] == '-' {
-				return errors.New("radix number cannot have a negative base")
+				return NewSyntaxError("radix number cannot have a negative base")
 			}
 			token.Append(char)
 			return s.readRadix(token)
@@ -116,7 +133,7 @@ wordBuilder:
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
 			if hasTrailingExponent {
-				return errors.New("received unexpected end of real number")
+				return NewSyntaxError("unexpected end of real number")
 			}
 			break
 		}
@@ -127,7 +144,7 @@ wordBuilder:
 		switch char {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			if hasTrailingExponent {
-				return errors.New("received unexpected end of real number")
+				return NewSyntaxError("unexpected end of real number")
 			}
 			break wordBuilder
 		case 'e', 'E':
@@ -161,7 +178,7 @@ wordBuilder:
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
 			if hasTrailingHash {
-				return errors.New("received unexpected end of radix number")
+				return NewSyntaxError("unexpected end of radix number")
 			}
 			break
 		}
@@ -172,7 +189,7 @@ wordBuilder:
 		switch char {
 		case '\x00', ' ', '\t', '\r', '\n', '\b', '\f':
 			if hasTrailingHash {
-				return errors.New("received unexpected end of radix number")
+				return NewSyntaxError("unexpected end of radix number")
 			}
 			break wordBuilder
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z':
@@ -186,16 +203,15 @@ wordBuilder:
 	return nil
 }
 
-// TODO: Support \ddd
-func (s *scanner) readString(token *Token) error {
-	token.Type = STRING_TOKEN
+func (s *scanner) readLiteralString(token *Token) error {
+	token.Type = LIT_STRING_TOKEN
 	activeParens := 0
 
 wordBuilder:
 	for {
 		char, _, err := s.reader.ReadRune()
 		if errors.Is(err, io.EOF) {
-			return errors.New("received unexpected end of file")
+			return NewSyntaxError("unexpected end of file")
 		}
 		if err != nil {
 			return err
@@ -241,7 +257,9 @@ wordBuilder:
 					return err
 				}
 				if afterCrlf[0] == '\n' {
-					_, _ = s.reader.ReadByte()
+					if _, _, err = s.reader.ReadRune(); err != nil {
+						return err
+					}
 				}
 			case '0', '1', '2', '3', '4', '5', '6', '7':
 				octal := []rune{afterSlash}
@@ -252,15 +270,87 @@ wordBuilder:
 				octal = append(octal, nextDigits...)
 				value, err := strconv.ParseInt(string(octal), 8, 32)
 				if err != nil {
-					return fmt.Errorf("unrecognized escape sequence: %s", string(octal))
+					return NewSyntaxErrorf("unrecognized escape sequence: %s", string(octal))
+				}
+				if _, _, err = s.reader.ReadRunes(2); err != nil {
+					return err
 				}
 				token.Append(rune(value))
 			default:
-				break
+				token.Append(afterSlash)
 			}
 		default:
 			token.Append(char)
 		}
+	}
+
+	return nil
+}
+
+func (s *scanner) readHexString(token *Token) error {
+	token.Type = HEX_STRING_TOKEN
+
+wordBuilder:
+	for {
+		char, _, err := s.reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		switch char {
+		case '>':
+			if len(token.Value)&1 != 0 {
+				token.Append('0')
+			}
+			break wordBuilder
+		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f', 'A', 'B', 'C', 'D', 'E', 'F':
+			token.Append(char)
+		default:
+			return NewSyntaxError("invalid hexidecimal")
+		}
+	}
+
+	return nil
+}
+
+func (s *scanner) readBase85String(token *Token) error {
+	token.Type = BASE85_STRING_TOKEN
+
+wordBuilder:
+	for {
+		char, _, err := s.reader.ReadRune()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		switch char {
+		case '~':
+			next, err := s.reader.PeekRunes(1)
+			if err != nil {
+				return err
+			}
+
+			if next[0] == '>' {
+				if _, _, err = s.reader.ReadRune(); err != nil {
+					return err
+				}
+				break wordBuilder
+			}
+			token.Append(char)
+		default:
+			token.Append(char)
+		}
+	}
+
+	_, _, err := ascii85.Decode(nil, runes.ToUTF8(token.Value), true)
+	if err != nil {
+		return NewSyntaxError("invalid base85")
 	}
 
 	return nil

@@ -44,3 +44,24 @@ func (r *Reader) PeekRunes(n int) ([]rune, error) {
 
 	return word, nil
 }
+
+func (r *Reader) ReadRunes(n int) ([]rune, int, error) {
+	word := []rune{}
+	wordSize := 0
+
+	for i := 0; i < n; i++ {
+		char, charSize, err := r.ReadRune()
+		if err != nil {
+			return word, wordSize, err
+		}
+
+		word = append(word, char)
+		wordSize += charSize
+	}
+
+	return word, wordSize, nil
+}
+
+func ToUTF8(rs []rune) []byte {
+	return []byte(string(rs))
+}
