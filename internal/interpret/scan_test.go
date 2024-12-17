@@ -1,13 +1,12 @@
 package interpret_test
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
 
 	"github.com/ian-shakespeare/libps/internal/interpret"
-	"github.com/ian-shakespeare/libps/pkg/array"
-	"github.com/ian-shakespeare/libps/pkg/iterator"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -16,7 +15,7 @@ func TestScan(t *testing.T) {
 
 	t.Run("comment", func(t *testing.T) {
 		s := interpret.NewScanner(strings.NewReader("% this is a comment"))
-		_, err := s.NextToken()
+		_, err := s.ReadToken()
 		assert.ErrorIs(t, io.EOF, err)
 	})
 
@@ -33,7 +32,7 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, interpret.NAME_TOKEN, token.Type)
 		})
@@ -58,6 +57,9 @@ func TestScan(t *testing.T) {
 		{"radixBase2", "2#1000", interpret.RADIX_TOKEN},
 		{"radixBase8", "8#1777", interpret.RADIX_TOKEN},
 		{"radixBase16", "16#FFFE", interpret.RADIX_TOKEN},
+		{"radixBaseUppercase", "16#FFFE", interpret.RADIX_TOKEN},
+		{"radixBaseLowercase", "16#fffe", interpret.RADIX_TOKEN},
+		{"radixBaseMixed", "16#ffFE", interpret.RADIX_TOKEN},
 	}
 
 	for _, input := range validNumerics {
@@ -65,7 +67,7 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, interpret.Token{Type: input.tokenType, Value: []rune(input.value)}, token)
 		})
@@ -76,7 +78,7 @@ func TestScan(t *testing.T) {
 
 		for _, input := range []string{"(this is a string", "(this is a string \\)"} {
 			s := interpret.NewScanner(strings.NewReader(input))
-			_, err := s.NextToken()
+			_, err := s.ReadToken()
 			assert.Error(t, err)
 			assert.NotErrorIs(t, io.EOF, err)
 		}
@@ -97,11 +99,120 @@ func TestScan(t *testing.T) {
 			t.Parallel()
 
 			s := interpret.NewScanner(strings.NewReader(input.value))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, input.expect, string(token.Value))
 		})
 	}
+
+	escapedStrings := []struct {
+		name   string
+		value  string
+		expect string
+	}{
+		{"stringEmpty", "()", ""},
+		{"stringNewline", "(\\n)", "\n"},
+		{"stringCrlf", "(\\r)", "\r"},
+		{"stringTab", "(\\t)", "\t"},
+		{"stringBackspace", "(\\b)", "\b"},
+		{"stringForm", "(\\f)", "\f"},
+		{"stringSlash", "(\\\\)", "\\"},
+		{"stringLParen", "(\\()", "("},
+		{"stringRParen", "(\\))", ")"},
+		{"stringIgnoreNewLine", "(\\\n)", ""},
+		{"stringIgnoreCrlf", "(\\\r)", ""},
+		{"stringIgnoreCrlfNewLine", "(\\\r\n)", ""},
+	}
+
+	for _, input := range escapedStrings {
+		t.Run(input.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.ReadToken()
+			assert.NoError(t, err)
+			assert.Equal(t, []rune(input.expect), token.Value)
+		})
+	}
+
+	t.Run("stringIgnoreEscape", func(t *testing.T) {
+		t.Parallel()
+
+		s := interpret.NewScanner(strings.NewReader("(\\ii)"))
+		token, err := s.ReadToken()
+		assert.NoError(t, err)
+		assert.Equal(t, "ii", string(token.Value))
+	})
+
+	octals := []struct {
+		name   string
+		value  string
+		expect int32
+	}{
+		{"stringOctalMin", "(\\000)", 0},
+		{"stringOctalMax", "(\\777)", 511},
+	}
+
+	for _, input := range octals {
+		t.Run(input.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.ReadToken()
+			assert.NoError(t, err)
+			assert.Equal(t, input.expect, token.Value[0])
+		})
+	}
+
+	hexStrings := []struct {
+		name   string
+		value  string
+		expect string
+	}{
+		{"stringHexZero", "<0>", "00"},
+		{"stringHexUppercase", "<FFFFFFFF>", "FFFFFFFF"},
+		{"stringHexLowercase", "<ffffffff>", "ffffffff"},
+		{"stringHexMixed", "<ffffFFFF>", "ffffFFFF"},
+		{"stringHexPad", "<901fa>", "901fa0"},
+		{"stringHex", "<901fa3>", "901fa3"},
+	}
+
+	for _, input := range hexStrings {
+		t.Run(input.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := interpret.NewScanner(strings.NewReader(input.value))
+			token, err := s.ReadToken()
+			assert.NoError(t, err)
+			assert.Equal(t, input.expect, string(token.Value))
+		})
+	}
+
+	t.Run("stringBase85", func(t *testing.T) {
+		t.Parallel()
+
+		s := interpret.NewScanner(strings.NewReader("<~FD,B0+DGm>F)Po,+EV1>F8~>"))
+		token, err := s.ReadToken()
+		assert.NoError(t, err)
+		assert.Equal(t, "FD,B0+DGm>F)Po,+EV1>F8", string(token.Value))
+	})
+
+	t.Run("stringAll", func(t *testing.T) {
+		t.Parallel()
+
+		s := interpret.NewScanner(strings.NewReader("(this is a literal string) <DEADBEEF> <~FD,B0+DGm>@3B#fF(I6d+EMXFBl7P~>"))
+		literalString, err := s.ReadToken()
+		assert.NoError(t, err)
+		assert.Equal(t, "this is a literal string", string(literalString.Value))
+
+		hexString, err := s.ReadToken()
+		assert.NoError(t, err)
+		assert.Equal(t, "DEADBEEF", string(hexString.Value))
+
+		base85String, err := s.ReadToken()
+		assert.NoError(t, err)
+		assert.Equal(t, "FD,B0+DGm>@3B#fF(I6d+EMXFBl7P", string(base85String.Value))
+	})
 
 	t.Run("name", func(t *testing.T) {
 		t.Parallel()
@@ -110,7 +221,7 @@ func TestScan(t *testing.T) {
 
 		for _, input := range inputs {
 			s := interpret.NewScanner(strings.NewReader(input))
-			token, err := s.NextToken()
+			token, err := s.ReadToken()
 			assert.NoError(t, err)
 			assert.Equal(t, string(input), string(token.Value))
 		}
@@ -134,9 +245,9 @@ myNegativeReal -3.1456
 
 		expect := []interpret.Token{
 			{Type: interpret.NAME_TOKEN, Value: []rune("myStr")},
-			{Type: interpret.STRING_TOKEN, Value: []rune("i have a string right here")},
+			{Type: interpret.LIT_STRING_TOKEN, Value: []rune("i have a string right here")},
 			{Type: interpret.NAME_TOKEN, Value: []rune("myOtherStr")},
-			{Type: interpret.STRING_TOKEN, Value: []rune("and\nanother right here")},
+			{Type: interpret.LIT_STRING_TOKEN, Value: []rune("and\nanother right here")},
 			{Type: interpret.NAME_TOKEN, Value: []rune("myInt")},
 			{Type: interpret.INT_TOKEN, Value: []rune("1234567890")},
 			{Type: interpret.NAME_TOKEN, Value: []rune("myNegativeInt")},
@@ -148,13 +259,18 @@ myNegativeReal -3.1456
 		}
 
 		s := interpret.NewScanner(strings.NewReader(input))
-		tokens, errs := iterator.Collect2(s.Tokens())
-		assert.False(t, array.Some(errs, func(err error) bool {
-			return err != nil
-		}))
-		assert.Len(t, tokens, len(expect))
-		assert.Equal(t, expect, tokens)
+		received := make([]interpret.Token, 0, len(expect))
 
-		// t.Log(tokens)
+		for {
+			token, err := s.ReadToken()
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			assert.NoError(t, err)
+			received = append(received, token)
+		}
+
+		assert.Len(t, received, len(expect))
+		assert.Equal(t, expect, received)
 	})
 }
