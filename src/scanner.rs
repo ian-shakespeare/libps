@@ -1,29 +1,27 @@
-use std::{io, io::Read};
+use std::{io, str};
 
-use crate::{
-    errors::{Error, ErrorKind},
-    token::Token,
-    traits::StringReader,
-};
+use crate::{token::Token, traits::StringReadPeeker, Error, ErrorKind};
 
-pub struct Scanner {
-    input: Box<dyn Read + 'static>,
+pub struct Scanner<'a> {
+    input: Box<dyn crate::PeekRead + 'a>,
 }
 
-impl Scanner {
-    pub fn new(_input: &'static str) -> Self {
+impl<'a> Scanner<'a> {
+    pub fn new(_input: &'a str) -> Self {
         Scanner {
-            input: Box::new(StringReader::from(_input)),
+            input: Box::new(StringReadPeeker::from(_input)),
         }
     }
 
-    pub fn read_token(&mut self) -> Result<Token, Error> {
+    pub fn read_token(&mut self) -> crate::Result<Token> {
         let mut word = String::new();
         let mut buf = [b'\x00'];
         loop {
             match self.input.read(&mut buf) {
-                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Err(Error::eof()),
-                Err(e) => return Err(Error::with_cause(ErrorKind::Unknown, Box::new(e))),
+                Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+                    return Err(Error::from(ErrorKind::UnexpectedEof))
+                }
+                Err(e) => return Err(Error::new(ErrorKind::Unknown, Box::new(e))),
                 _ => {}
             };
 
@@ -38,7 +36,20 @@ impl Scanner {
                     return self.read_real(word);
                 }
                 b'(' => {
-                    return self.read_string();
+                    return self.read_string_literal();
+                }
+                b'<' => {
+                    return match self.next_byte() {
+                        Err(e) => Err(e),
+                        Ok(next_ch) => match next_ch {
+                            None => Err(Error::from(ErrorKind::UnterminatedString)),
+                            Some(b'~') => self.read_string_base85(),
+                            Some(next_ch) => {
+                                word.push(next_ch.into());
+                                self.read_string_hex(word)
+                            }
+                        },
+                    }
                 }
                 b'%' => self.read_comment(),
                 _ => {
@@ -49,16 +60,25 @@ impl Scanner {
         }
     }
 
-    fn next_byte(&mut self) -> Result<Option<u8>, Error> {
+    fn next_byte(&mut self) -> crate::Result<Option<u8>> {
         let mut buf = [0];
         match self.input.read(&mut buf) {
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
-            Err(e) => return Err(Error::with_cause(ErrorKind::Unknown, Box::new(e))),
+            Err(e) => Err(Error::new(ErrorKind::Unknown, Box::new(e))),
             _ => Ok(Some(buf[0])),
         }
     }
 
-    fn read_comment(&mut self) -> Result<(), Error> {
+    fn peek_next_byte(&self) -> crate::Result<Option<u8>> {
+        let mut buf = [0];
+        match self.input.peek(&mut buf) {
+            Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => Ok(None),
+            Err(e) => Err(Error::new(ErrorKind::Unknown, Box::new(e))),
+            _ => Ok(Some(buf[0])),
+        }
+    }
+
+    fn read_comment(&mut self) -> crate::Result<()> {
         loop {
             match self.next_byte() {
                 Err(e) => return Err(e),
@@ -75,7 +95,7 @@ impl Scanner {
         Ok(())
     }
 
-    fn read_numeric(&mut self, mut word: String) -> Result<Token, Error> {
+    fn read_numeric(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.next_byte() {
                 Err(e) => return Err(e),
@@ -90,7 +110,7 @@ impl Scanner {
                         }
                         b'#' => {
                             if word.starts_with("-") {
-                                return Err(Error::new(ErrorKind::Syntax));
+                                return Err(Error::from(ErrorKind::Syntax));
                             }
                             word.push(ch.into());
                             return self.read_radix(word);
@@ -107,11 +127,11 @@ impl Scanner {
         if let Ok(value) = word.parse::<i32>() {
             Ok(Token::Integer(value))
         } else {
-            Err(Error::new(ErrorKind::Syntax))
+            Err(Error::from(ErrorKind::Syntax))
         }
     }
 
-    fn read_real(&mut self, mut word: String) -> Result<Token, Error> {
+    fn read_real(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.next_byte() {
                 Err(e) => return Err(e),
@@ -120,7 +140,7 @@ impl Scanner {
                     Some(ch) => match ch {
                         b'\x00' | b' ' | b'\t' | b'\r' | b'\n' | b'\x08' | b'\x0C' => {
                             if word.to_lowercase().ends_with('e') {
-                                return Err(Error::new(ErrorKind::Syntax));
+                                return Err(Error::from(ErrorKind::Syntax));
                             }
                             break;
                         }
@@ -161,19 +181,19 @@ impl Scanner {
                     let value = decimal * 10.0_f64.powi(exponent);
                     return Ok(Token::Real(value));
                 }
-                return Err(Error::new(ErrorKind::Syntax));
+                return Err(Error::from(ErrorKind::Syntax));
             }
-            return Err(Error::new(ErrorKind::Syntax));
+            return Err(Error::from(ErrorKind::Syntax));
         }
 
         if let Ok(value) = word.parse::<f64>() {
             Ok(Token::Real(value))
         } else {
-            Err(Error::new(ErrorKind::Syntax))
+            Err(Error::from(ErrorKind::Syntax))
         }
     }
 
-    fn read_radix(&mut self, mut word: String) -> Result<Token, Error> {
+    fn read_radix(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.next_byte() {
                 Err(e) => return Err(e),
@@ -182,7 +202,7 @@ impl Scanner {
                     Some(ch) => match ch {
                         b'\x00' | b' ' | b'\t' | b'\r' | b'\n' | b'\x08' | b'\x0C' => {
                             if word.ends_with('#') {
-                                return Err(Error::new(ErrorKind::Syntax));
+                                return Err(Error::from(ErrorKind::Syntax));
                             }
                             break;
                         }
@@ -204,14 +224,14 @@ impl Scanner {
             if let Ok(value) = i32::from_str_radix(digits, base) {
                 Ok(Token::Integer(value))
             } else {
-                Err(Error::new(ErrorKind::Syntax))
+                Err(Error::from(ErrorKind::Syntax))
             }
         } else {
-            Err(Error::new(ErrorKind::Syntax))
+            Err(Error::from(ErrorKind::Syntax))
         }
     }
 
-    fn read_string(&mut self) -> Result<Token, Error> {
+    fn read_string_literal(&mut self) -> crate::Result<Token> {
         let mut word = String::new();
         let mut active_parenthesis = 0;
 
@@ -219,7 +239,7 @@ impl Scanner {
             match self.next_byte() {
                 Err(e) => return Err(e),
                 Ok(ch) => match ch {
-                    None => return Err(Error::new(ErrorKind::UnterminatedString)),
+                    None => return Err(Error::from(ErrorKind::UnterminatedString)),
                     Some(ch) => match ch {
                         b'(' => {
                             word.push(ch.into());
@@ -236,7 +256,7 @@ impl Scanner {
                             let next_ch = match self.next_byte() {
                                 Err(e) => Err(e),
                                 Ok(next_ch) => match next_ch {
-                                    None => Err(Error::eof()),
+                                    None => Err(Error::from(ErrorKind::UnexpectedEof)),
                                     Some(next_ch) => Ok(next_ch),
                                 },
                             }?;
@@ -250,7 +270,40 @@ impl Scanner {
                                 b'\\' => word.push('\\'),
                                 b'(' => word.push('('),
                                 b')' => word.push(')'),
-                                // TODO: support \r\n and octals
+                                b'\r' => match self.peek_next_byte() {
+                                    Err(e) => return Err(e),
+                                    Ok(next_ch) => match next_ch {
+                                        None => {
+                                            return Err(Error::from(ErrorKind::UnterminatedString))
+                                        }
+                                        Some(b'\n') => {
+                                            let _ = self.next_byte()?;
+                                        }
+                                        _ => {}
+                                    },
+                                },
+                                b'0'..=b'9' => {
+                                    let mut octal = String::new();
+                                    octal.push(next_ch.into());
+
+                                    let mut next_digits = [0, 0];
+                                    let _ = self.input.peek(&mut next_digits)?;
+                                    match str::from_utf8(&next_digits) {
+                                        Err(_) => return Err(Error::from(ErrorKind::Syntax)),
+                                        Ok(next_digits) => {
+                                            octal.push_str(next_digits);
+                                        }
+                                    }
+
+                                    match u8::from_str_radix(&octal, 8) {
+                                        Err(_) => return Err(Error::from(ErrorKind::Syntax)),
+                                        Ok(value) => word.push(value.into()),
+                                    }
+
+                                    for _ in 0..2 {
+                                        let _ = self.next_byte()?;
+                                    }
+                                }
                                 _ => word.push(next_ch.into()),
                             }
                         }
@@ -263,9 +316,52 @@ impl Scanner {
         Ok(Token::String(word))
     }
 
-    // TODO: support hex and base85 strings
+    fn read_string_hex(&mut self, mut word: String) -> crate::Result<Token> {
+        loop {
+            match self.next_byte() {
+                Err(e) => return Err(e),
+                Ok(ch) => match ch {
+                    None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                    Some(ch) => match ch {
+                        b'>' => break,
+                        b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' => word.push(ch.into()),
+                        _ => return Err(Error::new(ErrorKind::Syntax, "invalid hex string")),
+                    },
+                },
+            }
+        }
 
-    fn read_name(&mut self, mut word: String) -> Result<Token, Error> {
+        // TODO: Actually decode the hex
+        Ok(Token::String(word))
+    }
+
+    fn read_string_base85(&mut self) -> crate::Result<Token> {
+        let mut word = String::new();
+        loop {
+            match self.next_byte() {
+                Err(e) => return Err(e),
+                Ok(ch) => match ch {
+                    None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                    Some(ch) => match ch {
+                        b'~' => match self.peek_next_byte() {
+                            Err(e) => return Err(e),
+                            Ok(next_ch) => match next_ch {
+                                None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                                Some(b'>') => break,
+                                _ => continue,
+                            },
+                        },
+                        _ => word.push(ch.into()),
+                    },
+                },
+            }
+        }
+
+        // TODO: Actually decode the ascii85
+        Ok(Token::String(word))
+    }
+
+    fn read_name(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.next_byte() {
                 Err(e) => return Err(e),
@@ -285,7 +381,7 @@ impl Scanner {
 
 #[cfg(test)]
 mod tests {
-    use std::str;
+    use std::{error, str};
 
     use super::*;
 
@@ -294,11 +390,11 @@ mod tests {
         let mut scanner = Scanner::new("% this is a comment");
         let token = scanner.read_token();
 
-        assert!(token.is_err_and(|e| e.kind() == ErrorKind::UnexpectedEof));
+        assert!(token.is_err_and(|e| e.kind() == crate::ErrorKind::UnexpectedEof));
     }
 
     #[test]
-    fn test_bad_numeric() -> Result<(), Error> {
+    fn test_bad_numeric() -> Result<(), Box<dyn error::Error>> {
         let inputs = ["1x0", "1.x0"];
         for input in inputs {
             let mut scanner = Scanner::new(input);
@@ -311,7 +407,7 @@ mod tests {
     }
 
     #[test]
-    fn test_numeric() -> Result<(), Error> {
+    fn test_numeric() -> Result<(), Box<dyn error::Error>> {
         let cases = [
             ("1", Token::Integer(1)),
             ("-1", Token::Integer(-1)),
@@ -353,7 +449,7 @@ mod tests {
     }
 
     #[test]
-    fn test_string() -> Result<(), Error> {
+    fn test_string() -> Result<(), Box<dyn error::Error>> {
         let cases = [
             ("(this is a string)", "this is a string"),
             (
@@ -381,7 +477,7 @@ mod tests {
     }
 
     #[test]
-    fn test_escaped_string() -> Result<(), Error> {
+    fn test_escaped_string() -> Result<(), Box<dyn error::Error>> {
         let cases = [
             ("()", ""),
             ("(\\n)", "\n"),
@@ -408,7 +504,7 @@ mod tests {
     }
 
     #[test]
-    fn test_escaped_string_ignore() -> Result<(), Error> {
+    fn test_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
         let mut scanner = Scanner::new("(\\ii)");
         let token = scanner.read_token()?;
 
@@ -417,14 +513,12 @@ mod tests {
     }
 
     #[test]
-    fn test_octal_string() -> Result<(), Error> {
-        let cases = [("(\\000)", 0), ("(\\377)", 255)];
+    fn test_octal_string() -> Result<(), Box<dyn error::Error>> {
+        let cases = [("(\\000)", "\0"), ("(\\377)", "ÿ")];
 
         for (input, expect) in cases {
             let mut scanner = Scanner::new(input);
             let token = scanner.read_token()?;
-
-            let expect = unsafe { str::from_boxed_utf8_unchecked(Box::new([expect])) };
 
             assert_eq!(Token::String(expect.to_string()), token);
         }
@@ -433,21 +527,21 @@ mod tests {
     }
 
     #[test]
-    fn test_hex_string() -> Result<(), Error> {
+    fn test_hex_string() -> Result<(), Box<dyn error::Error>> {
         let cases = [
-            ("<0>", b"\x00".to_vec()),
-            ("<FFFFFFFF>", b"\xFF\xFF\xFF\xFF".to_vec()),
-            ("<ffffffff>", b"\xFF\xFF\xFF\xFF".to_vec()),
-            ("<ffffFFFF>", b"\xFF\xFF\xFF\xFF".to_vec()),
-            ("<901fa>", b"\x90\x1F\xA0".to_vec()),
-            ("<901fa3>", b"\x90\x1F\xA3".to_vec()),
+            ("<0>", vec![b'\x00']),
+            ("<FFFFFFFF>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
+            ("<ffffffff>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
+            ("<ffffFFFF>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
+            ("<901fa>", vec![b'\x90', b'\x1F', b'\xA0']),
+            ("<901fa3>", vec![b'\x90', b'\x1F', b'\xA3']),
         ];
 
         for (input, expect) in cases {
             let mut scanner = Scanner::new(input);
             let token = scanner.read_token()?;
 
-            let expect = unsafe { str::from_boxed_utf8_unchecked(expect.into()) };
+            let expect = str::from_utf8(&expect)?;
 
             assert_eq!(Token::String(expect.to_string()), token);
         }
@@ -456,8 +550,8 @@ mod tests {
     }
 
     #[test]
-    fn test_base85_string() -> Result<(), Error> {
-        let input = "FD,B0+DGm>F)Po,+EV1>F8";
+    fn test_base85_string() -> Result<(), Box<dyn error::Error>> {
+        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
         let mut scanner = Scanner::new(input);
         let token = scanner.read_token()?;
 
@@ -467,7 +561,7 @@ mod tests {
     }
 
     #[test]
-    fn test_multiple_string() -> Result<(), Error> {
+    fn test_multiple_string() -> Result<(), Box<dyn error::Error>> {
         let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
         let mut scanner = Scanner::new(input);
 
@@ -490,7 +584,7 @@ mod tests {
     }
 
     #[test]
-    fn test_name() -> Result<(), Error> {
+    fn test_name() -> Result<(), Box<dyn error::Error>> {
         let inputs = [
             "abc", "Offset", "$$", "23A", "13-456", "a.b", "$MyDict", "@pattern",
         ];
@@ -506,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn test_all() -> Result<(), Error> {
+    fn test_all() -> Result<(), Box<dyn error::Error>> {
         let input = "
 myStr (i have a string right here)
 myOtherStr (and
