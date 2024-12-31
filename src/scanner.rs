@@ -1,6 +1,6 @@
 use std::{io, str};
 
-use crate::{token::Token, traits::StringReadPeeker, Error, ErrorKind};
+use crate::{encoding::decode_ascii85, token::Token, traits::StringReadPeeker, Error, ErrorKind};
 
 pub struct Scanner<'a> {
     input: Box<dyn crate::PeekRead + 'a>,
@@ -357,8 +357,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        // TODO: Actually decode the ascii85
-        Ok(Token::String(word))
+        Ok(Token::String(decode_ascii85(&word)?))
     }
 
     fn read_name(&mut self, mut word: String) -> crate::Result<Token> {

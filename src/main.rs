@@ -1,5 +1,5 @@
-use libps::scan;
+use libps::encode;
 
 fn main() {
-    scan("(\\000)");
+    encode();
 }

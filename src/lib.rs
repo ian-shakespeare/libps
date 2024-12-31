@@ -1,7 +1,9 @@
+use encoding::decode_ascii85;
 pub use error::{Error, ErrorKind};
 use scanner::Scanner;
 use std::io;
 
+mod encoding;
 mod error;
 mod scanner;
 pub mod token;
@@ -25,4 +27,9 @@ pub fn scan(input: &'static str) {
             Result::Err(e) => println!("{:?}", e),
         }
     }
+}
+
+pub fn encode() {
+    let out = decode_ascii85("F*2M7").unwrap();
+    println!("{}", out);
 }
