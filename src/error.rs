@@ -8,13 +8,13 @@ pub enum ErrorKind {
     Syntax,
 }
 
-impl Into<&'static str> for ErrorKind {
-    fn into(self) -> &'static str {
-        match self {
-            Self::Unknown => "ERR_UNKNOWN",
-            Self::UnexpectedEof => "ERR_UNEXPECTED_EOF",
-            Self::UnterminatedString => "ERR_UNTERMINATED_STR",
-            Self::Syntax => "ERR_SYNTAX",
+impl From<ErrorKind> for &'static str {
+    fn from(value: ErrorKind) -> Self {
+        match value {
+            ErrorKind::Unknown => "ERR_UNKNOWN",
+            ErrorKind::UnexpectedEof => "ERR_UNEXPECTED_EOF",
+            ErrorKind::UnterminatedString => "ERR_UNTERMINATED_STR",
+            ErrorKind::Syntax => "ERR_SYNTAX",
         }
     }
 }

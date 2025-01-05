@@ -1,34 +1,12 @@
 use std::str;
 
-fn encode_ascii85_chunk(chunk: &[u8; 4]) -> crate::Result<String> {
-    let mut encoded = String::with_capacity(4);
-
-    let mut pattern: u32 = ((((((0b0 | u32::from(chunk[0])) << 8) | u32::from(chunk[1])) << 8)
-        | u32::from(chunk[2]))
-        << 8)
-        | u32::from(chunk[3]);
-
-    for i in 1..=5 {
-        let ascii_ch: u32 = (pattern % 85) + 33;
-        pattern /= 85;
-
-        if i <= 4 && chunk[4 - i] == b'\0' {
-            continue;
-        }
-
-        if ascii_ch < 33 || 117 < ascii_ch {
-            return Err(crate::Error::new(
-                crate::ErrorKind::Syntax,
-                "received unprintable character",
-            ));
-        }
-
-        encoded.push(ascii_ch.try_into().unwrap());
+fn fill_buffer(buf: &mut [u8], ch: u8) {
+    for b in buf {
+        *b = ch;
     }
-
-    Ok(encoded.chars().rev().collect())
 }
 
+#[allow(dead_code)]
 pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
     // Encoded string will be roughly 5/4 times larger than the raw string
     let mut encoded = String::with_capacity((raw.len() * 5) / 4);
@@ -40,33 +18,39 @@ pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
 
         // Collected a complete chunk
         if chunk_index == 3 || i == raw.len() - 1 {
-            encoded.push_str(&encode_ascii85_chunk(&chunk)?);
-            chunk[0] = b'\0';
-            chunk[1] = b'\0';
-            chunk[2] = b'\0';
-            chunk[3] = b'\0';
+            let mut encoded_chunk = String::with_capacity(4);
+
+            let mut pattern: u32 = (((((u32::from(chunk[0]) << 8) | u32::from(chunk[1])) << 8)
+                | u32::from(chunk[2]))
+                << 8)
+                | u32::from(chunk[3]);
+
+            for i in 1..=5 {
+                let ascii_ch: u32 = (pattern % 85) + 33;
+                pattern /= 85;
+
+                if i <= 4 && chunk[4 - i] == b'\0' {
+                    continue;
+                }
+
+                if !(33..=117).contains(&ascii_ch) {
+                    return Err(crate::Error::new(
+                        crate::ErrorKind::Syntax,
+                        "received unprintable character",
+                    ));
+                }
+
+                encoded_chunk.push(ascii_ch.try_into().unwrap());
+            }
+
+            encoded_chunk = encoded_chunk.chars().rev().collect();
+
+            encoded.push_str(&encoded_chunk);
+            fill_buffer(&mut chunk, b'\0');
         }
     }
 
     Ok(encoded)
-}
-
-pub fn decode_ascii85_chunk(chunk: &[u8; 5]) -> crate::Result<String> {
-    let mut decoded = String::with_capacity(4);
-
-    const POWERS: [u32; 5] = [85 * 85 * 85 * 85, 85 * 85 * 85, 85 * 85, 85, 1];
-    let mut pattern: u32 = 0b0;
-    for (i, ch) in chunk.iter().enumerate() {
-        pattern += u32::from((*ch).max(33) - 33) * POWERS[i];
-    }
-
-    const CLEAR: u32 = 0b11111111;
-    for shift in (0..25).step_by(8).rev() {
-        let ch = (pattern >> shift) & CLEAR;
-        decoded.push(ch.try_into().expect("something broke"));
-    }
-
-    Ok(decoded)
 }
 
 pub fn decode_ascii85(encoded: &str) -> crate::Result<String> {
@@ -79,20 +63,75 @@ pub fn decode_ascii85(encoded: &str) -> crate::Result<String> {
         chunk[chunk_index] = ch;
 
         // Collected a complete chunk
-        if chunk_index == 4 {
-            decoded.push_str(&decode_ascii85_chunk(&chunk)?);
-            chunk[0] = b'u';
-            chunk[1] = b'u';
-            chunk[2] = b'u';
-            chunk[3] = b'u';
-            chunk[4] = b'u';
-        } else if i == encoded.len() - 1 {
-            let mut partial = decode_ascii85_chunk(&chunk)?;
-            let pad_amount = 5 - (encoded.len() % 5);
-            if pad_amount != 5 {
-                let _ = partial.split_off(partial.len() - (1 + pad_amount));
+        let is_last = i == encoded.len() - 1;
+        if chunk_index == 4 || is_last {
+            let mut decoded_chunk = String::with_capacity(4);
+
+            const POWERS: [u32; 5] = [85 * 85 * 85 * 85, 85 * 85 * 85, 85 * 85, 85, 1];
+            let mut pattern: u32 = 0b0;
+            for (i, ch) in chunk.iter().enumerate() {
+                pattern += u32::from((*ch).max(33) - 33) * POWERS[i];
             }
-            decoded.push_str(&partial);
+
+            const CLEAR: u32 = 0b11111111;
+            for shift in (0..25).step_by(8).rev() {
+                match char::from_u32((pattern >> shift) & CLEAR) {
+                    None => return Err(crate::Error::from(crate::ErrorKind::Syntax)),
+                    Some(ch) => decoded_chunk.push(ch),
+                }
+            }
+            decoded.push_str(&decoded_chunk);
+            fill_buffer(&mut chunk, b'u');
+        }
+    }
+
+    // Cut off empty end
+    let pad_amount = 5 - (encoded.len() % 5);
+    if pad_amount != 5 {
+        // TODO: Investigate if there is a better way (split_off doesn't work)
+        for _ in 0..pad_amount {
+            decoded.pop();
+        }
+    }
+
+    Ok(decoded)
+}
+
+#[allow(dead_code)]
+pub fn encode_hex(s: &str) -> crate::Result<String> {
+    let mut encoded = String::with_capacity(s.len() * 2);
+
+    for ch in s.bytes() {
+        let ch = format!("{:X}", ch);
+        encoded.push_str(&ch);
+    }
+
+    Ok(encoded)
+}
+
+pub fn decode_hex(encoded: &str) -> crate::Result<String> {
+    let mut decoded = String::with_capacity(encoded.len() / 2);
+
+    let mut chunk = [b'\0', b'\0'];
+    for (i, ch) in encoded.to_uppercase().bytes().enumerate() {
+        let chunk_index = i % 2;
+        chunk[chunk_index] = ch;
+
+        // Collected a complete chunk
+        let is_last = i == encoded.len() - 1;
+        if chunk_index == 1 || is_last {
+            if is_last && chunk[1] == b'\0' {
+                chunk[1] = b'0';
+            }
+
+            if let Ok(code) = str::from_utf8(&chunk) {
+                match u8::from_str_radix(code, 16) {
+                    Err(_) => return Err(crate::Error::from(crate::ErrorKind::Syntax)),
+                    Ok(ch) => decoded.push(ch.into()),
+                }
+            }
+
+            fill_buffer(&mut chunk, b'\0');
         }
     }
 
@@ -155,6 +194,41 @@ mod tests {
 
         for (input, expect) in cases {
             let received = decode_ascii85(input)?;
+
+            assert_eq!(expect, &received);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_encode_hex() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("", ""),
+            (".", "2E"),
+            ("this is some text", "7468697320697320736F6D652074657874"),
+        ];
+
+        for (input, expect) in cases {
+            let received = encode_hex(input)?;
+
+            assert_eq!(expect, &received);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_decode_hex() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("", ""),
+            ("4", "@"),
+            ("2E", "."),
+            ("7468697320697320736F6D652074657874", "this is some text"),
+        ];
+
+        for (input, expect) in cases {
+            let received = decode_hex(input)?;
 
             assert_eq!(expect, &received);
         }

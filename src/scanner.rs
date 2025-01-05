@@ -1,6 +1,11 @@
 use std::{io, str};
 
-use crate::{encoding::decode_ascii85, token::Token, traits::StringReadPeeker, Error, ErrorKind};
+use crate::{
+    encoding::{decode_ascii85, decode_hex},
+    token::Token,
+    traits::StringReadPeeker,
+    Error, ErrorKind,
+};
 
 pub struct Scanner<'a> {
     input: Box<dyn crate::PeekRead + 'a>,
@@ -324,6 +329,7 @@ impl<'a> Scanner<'a> {
                     None => return Err(Error::from(ErrorKind::UnterminatedString)),
                     Some(ch) => match ch {
                         b'>' => break,
+                        b'\x00' | b' ' | b'\t' | b'\r' | b'\n' | b'\x08' | b'\x0C' => continue,
                         b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' => word.push(ch.into()),
                         _ => return Err(Error::new(ErrorKind::Syntax, "invalid hex string")),
                     },
@@ -331,8 +337,7 @@ impl<'a> Scanner<'a> {
             }
         }
 
-        // TODO: Actually decode the hex
-        Ok(Token::String(word))
+        Ok(Token::String(decode_hex(&word)?))
     }
 
     fn read_string_base85(&mut self) -> crate::Result<Token> {
@@ -380,7 +385,7 @@ impl<'a> Scanner<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::{error, str};
+    use std::error;
 
     use super::*;
 
@@ -528,19 +533,17 @@ mod tests {
     #[test]
     fn test_hex_string() -> Result<(), Box<dyn error::Error>> {
         let cases = [
-            ("<0>", vec![b'\x00']),
-            ("<FFFFFFFF>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
-            ("<ffffffff>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
-            ("<ffffFFFF>", vec![b'\xFF', b'\xFF', b'\xFF', b'\xFF']),
-            ("<901fa>", vec![b'\x90', b'\x1F', b'\xA0']),
-            ("<901fa3>", vec![b'\x90', b'\x1F', b'\xA3']),
+            ("<736F6D65>", "some"),
+            ("<736f6d65>", "some"),
+            ("<736f6D65>", "some"),
+            ("<73 6F 6D 65>", "some"),
+            ("<70756D7>", "pump"),
+            ("<70756D70>", "pump"),
         ];
 
         for (input, expect) in cases {
             let mut scanner = Scanner::new(input);
             let token = scanner.read_token()?;
-
-            let expect = str::from_utf8(&expect)?;
 
             assert_eq!(Token::String(expect.to_string()), token);
         }

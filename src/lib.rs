@@ -9,7 +9,7 @@ mod scanner;
 pub mod token;
 pub mod traits;
 
-pub type Result<T> = std::result::Result<T, Error>;
+pub type Result<T> = std::result::Result<T, crate::Error>;
 
 pub trait Peek {
     fn peek(&self, buf: &mut [u8]) -> io::Result<usize>;
@@ -30,6 +30,6 @@ pub fn scan(input: &'static str) {
 }
 
 pub fn encode() {
-    let out = decode_ascii85("F*2M7").unwrap();
+    let out = decode_ascii85("FD,B0+DGm>@3B#fF(I<g+EMXFBl7P").unwrap();
     println!("{}", out);
 }
