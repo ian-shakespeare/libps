@@ -1,5 +1,7 @@
 use std::str;
 
+use crate::{Error, ErrorKind};
+
 fn fill_buffer(buf: &mut [u8], ch: u8) {
     for b in buf {
         *b = ch;
@@ -34,8 +36,8 @@ pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
                 }
 
                 if !(33..=117).contains(&ascii_ch) {
-                    return Err(crate::Error::new(
-                        crate::ErrorKind::Syntax,
+                    return Err(Error::new(
+                        ErrorKind::Syntax,
                         "received unprintable character",
                     ));
                 }
@@ -68,15 +70,16 @@ pub fn decode_ascii85(encoded: &str) -> crate::Result<String> {
             let mut decoded_chunk = String::with_capacity(4);
 
             const POWERS: [u32; 5] = [85 * 85 * 85 * 85, 85 * 85 * 85, 85 * 85, 85, 1];
-            let mut pattern: u32 = 0b0;
-            for (i, ch) in chunk.iter().enumerate() {
-                pattern += u32::from((*ch).max(33) - 33) * POWERS[i];
-            }
+            let pattern = chunk
+                .iter()
+                .zip(POWERS)
+                .fold(0b0, |pattern, (ch, power)| -> u32 {
+                    pattern + u32::from((*ch).max(33) - 33) * power
+                });
 
-            const CLEAR: u32 = 0b11111111;
-            for shift in (0..25).step_by(8).rev() {
-                match char::from_u32((pattern >> shift) & CLEAR) {
-                    None => return Err(crate::Error::from(crate::ErrorKind::Syntax)),
+            for shift in [24, 16, 8, 0] {
+                match char::from_u32((pattern >> shift) & 0b11111111) {
+                    None => return Err(Error::from(ErrorKind::Syntax)),
                     Some(ch) => decoded_chunk.push(ch),
                 }
             }
@@ -126,7 +129,7 @@ pub fn decode_hex(encoded: &str) -> crate::Result<String> {
 
             if let Ok(code) = str::from_utf8(&chunk) {
                 match u8::from_str_radix(code, 16) {
-                    Err(_) => return Err(crate::Error::from(crate::ErrorKind::Syntax)),
+                    Err(_) => return Err(Error::from(ErrorKind::Syntax)),
                     Ok(ch) => decoded.push(ch.into()),
                 }
             }

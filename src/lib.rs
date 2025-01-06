@@ -7,7 +7,6 @@ mod encoding;
 mod error;
 mod scanner;
 pub mod token;
-pub mod traits;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -18,8 +17,8 @@ pub trait Peek {
 pub trait PeekRead: Peek + io::Read {}
 impl<T: Peek + io::Read> PeekRead for T {}
 
-pub fn scan(input: &'static str) {
-    let mut scanner = Scanner::new(input);
+pub fn scan(input: &str) {
+    let mut scanner = Scanner::from(input.chars());
     loop {
         match scanner.read_token() {
             Result::Ok(t) => println!("{:?}", t),
