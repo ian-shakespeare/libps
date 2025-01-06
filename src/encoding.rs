@@ -22,13 +22,12 @@ pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
         if chunk_index == 3 || i == raw.len() - 1 {
             let mut encoded_chunk = String::with_capacity(4);
 
-            let mut pattern: u32 = (((((u32::from(chunk[0]) << 8) | u32::from(chunk[1])) << 8)
-                | u32::from(chunk[2]))
-                << 8)
-                | u32::from(chunk[3]);
+            let mut pattern = (0..4).fold(0b0_u32, |acc, index| {
+                (acc | u32::from(chunk[index])) << if index < 3 { 8 } else { 0 }
+            });
 
             for i in 1..=5 {
-                let ascii_ch: u32 = (pattern % 85) + 33;
+                let ascii_ch = (pattern % 85) + 33;
                 pattern /= 85;
 
                 if i <= 4 && chunk[4 - i] == b'\0' {
@@ -46,7 +45,6 @@ pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
             }
 
             encoded_chunk = encoded_chunk.chars().rev().collect();
-
             encoded.push_str(&encoded_chunk);
             fill_buffer(&mut chunk, b'\0');
         }
