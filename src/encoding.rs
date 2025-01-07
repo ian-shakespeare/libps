@@ -89,7 +89,6 @@ pub fn decode_ascii85(encoded: &str) -> crate::Result<String> {
     // Cut off empty end
     let pad_amount = 5 - (encoded.len() % 5);
     if pad_amount != 5 {
-        // TODO: Investigate if there is a better way (split_off doesn't work)
         for _ in 0..pad_amount {
             decoded.pop();
         }

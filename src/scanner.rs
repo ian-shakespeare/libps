@@ -199,17 +199,19 @@ where
         }
 
         let mut parts = word.split('#');
-        let base = parts.next().expect("TODO: handle this neatly");
-        let digits = parts.next().expect("TODO: handle this neatly");
-
-        if let Ok(base) = base.parse::<u32>() {
-            if let Ok(value) = i32::from_str_radix(digits, base) {
-                Ok(Token::Integer(value))
-            } else {
-                Err(Error::from(ErrorKind::Syntax))
+        match (parts.next(), parts.next()) {
+            (Some(base), Some(digits)) => {
+                if let Ok(base) = base.parse::<u32>() {
+                    if let Ok(value) = i32::from_str_radix(digits, base) {
+                        Ok(Token::Integer(value))
+                    } else {
+                        Err(Error::from(ErrorKind::Syntax))
+                    }
+                } else {
+                    Err(Error::from(ErrorKind::Syntax))
+                }
             }
-        } else {
-            Err(Error::from(ErrorKind::Syntax))
+            _ => Err(Error::from(ErrorKind::Syntax)),
         }
     }
 
