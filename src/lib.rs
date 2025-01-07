@@ -4,6 +4,7 @@ use scanner::Scanner;
 mod encoding;
 mod error;
 mod scanner;
+mod stack;
 pub mod token;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
