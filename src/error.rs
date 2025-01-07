@@ -1,4 +1,4 @@
-use std::{fmt, io};
+use std::fmt;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ErrorKind {
@@ -57,12 +57,3 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
-
-impl From<io::Error> for Error {
-    fn from(value: io::Error) -> Self {
-        match value.kind() {
-            io::ErrorKind::UnexpectedEof => Error::from(ErrorKind::UnexpectedEof),
-            _ => Error::new(ErrorKind::Unknown, value),
-        }
-    }
-}

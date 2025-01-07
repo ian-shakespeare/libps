@@ -21,44 +21,59 @@ where
     }
 }
 
+impl<I> Iterator for Scanner<I>
+where
+    I: Iterator<Item = char>,
+{
+    type Item = crate::Result<Token>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let mut word = String::new();
+        loop {
+            match self.input.next() {
+                None => return None,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => {
+                    continue;
+                }
+                Some('%') => {
+                    if let Err(e) = self.read_comment() {
+                        return Some(Err(e));
+                    }
+                }
+                Some(ch) => {
+                    return Some(match ch {
+                        '-' | '0'..='9' => {
+                            word.push(ch);
+                            self.read_numeric(word)
+                        }
+                        '.' => {
+                            word.push(ch);
+                            self.read_real(word)
+                        }
+                        '(' => self.read_string_literal(),
+                        '<' => match self.input.next() {
+                            None => Err(Error::from(ErrorKind::UnterminatedString)),
+                            Some('~') => self.read_string_base85(),
+                            Some(next_ch) => {
+                                word.push(next_ch);
+                                self.read_string_hex(word)
+                            }
+                        },
+                        _ => {
+                            word.push(ch);
+                            self.read_name(word)
+                        }
+                    });
+                }
+            };
+        }
+    }
+}
+
 impl<I> Scanner<I>
 where
     I: Iterator<Item = char>,
 {
-    pub fn read_token(&mut self) -> crate::Result<Token> {
-        let mut word = String::new();
-        loop {
-            match self.input.next() {
-                None => Err(Error::from(ErrorKind::UnexpectedEof)),
-                Some(ch) => match ch {
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => continue,
-                    '%' => self.read_comment(),
-                    '-' | '0'..='9' => {
-                        word.push(ch);
-                        return self.read_numeric(word);
-                    }
-                    '.' => {
-                        word.push(ch);
-                        return self.read_real(word);
-                    }
-                    '(' => return self.read_string_literal(),
-                    '<' => match self.input.next() {
-                        None => Err(Error::from(ErrorKind::UnterminatedString)),
-                        Some('~') => return self.read_string_base85(),
-                        Some(next_ch) => {
-                            word.push(next_ch);
-                            return self.read_string_hex(word);
-                        }
-                    },
-                    _ => {
-                        word.push(ch);
-                        return self.read_name(word);
-                    }
-                },
-            }?;
-        }
-    }
-
     fn read_comment(&mut self) -> crate::Result<()> {
         loop {
             match self.input.next() {
@@ -327,9 +342,9 @@ mod tests {
     #[test]
     fn test_comment() {
         let mut scanner = Scanner::from("% this is a comment".chars());
-        let token = scanner.read_token();
+        let token = scanner.next();
 
-        assert!(token.is_err_and(|e| e.kind() == crate::ErrorKind::UnexpectedEof));
+        assert!(token.is_none());
     }
 
     #[test]
@@ -337,9 +352,11 @@ mod tests {
         let inputs = ["1x0", "1.x0"];
         for input in inputs {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::Name(String::from(input)), token);
+            assert_eq!(Token::Name(String::from(input)), token?);
         }
 
         Ok(())
@@ -368,23 +385,29 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(expect, token);
+            assert_eq!(expect, token?);
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_bad_string() {
+    fn test_bad_string() -> Result<(), Box<dyn error::Error>> {
         let inputs = ["(this is a string", "(this is a string\\)"];
         for input in inputs {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token();
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
             assert!(token.is_err_and(|e| e.kind() == ErrorKind::UnterminatedString));
         }
+
+        Ok(())
     }
 
     #[test]
@@ -407,9 +430,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::String(String::from(expect)), token);
+            assert_eq!(Token::String(String::from(expect)), token?);
         }
 
         Ok(())
@@ -434,9 +459,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::String(String::from(expect)), token);
+            assert_eq!(Token::String(String::from(expect)), token?);
         }
 
         Ok(())
@@ -445,9 +472,11 @@ mod tests {
     #[test]
     fn test_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
         let mut scanner = Scanner::from("(\\ii)".chars());
-        let token = scanner.read_token()?;
+        let Some(token) = scanner.next() else {
+            return Err("expected token".into());
+        };
 
-        assert_eq!(Token::String(String::from("ii")), token);
+        assert_eq!(Token::String(String::from("ii")), token?);
         Ok(())
     }
 
@@ -457,9 +486,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::String(expect.to_string()), token);
+            assert_eq!(Token::String(expect.to_string()), token?);
         }
 
         Ok(())
@@ -478,9 +509,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::String(expect.to_string()), token);
+            assert_eq!(Token::String(expect.to_string()), token?);
         }
 
         Ok(())
@@ -490,9 +523,11 @@ mod tests {
     fn test_base85_string() -> Result<(), Box<dyn error::Error>> {
         let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
         let mut scanner = Scanner::from(input.chars());
-        let token = scanner.read_token()?;
+        let Some(token) = scanner.next() else {
+            return Err("expected token".into());
+        };
 
-        assert_eq!(Token::String(String::from("this is some text")), token);
+        assert_eq!(Token::String(String::from("this is some text")), token?);
 
         Ok(())
     }
@@ -502,20 +537,16 @@ mod tests {
         let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
         let mut scanner = Scanner::from(input.chars());
 
-        let token = scanner.read_token()?;
-        assert_eq!(
-            Token::String(String::from("this is a literal string")),
-            token
-        );
-
-        let token = scanner.read_token()?;
-        assert_eq!(Token::String(String::from("this is a hex string")), token);
-
-        let token = scanner.read_token()?;
-        assert_eq!(
-            Token::String(String::from("this is a base85 string")),
-            token
-        );
+        for expected in [
+            "this is a literal string",
+            "this is a hex string",
+            "this is a base85 string",
+        ] {
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
+            assert_eq!(Token::String(expected.to_string()), token?);
+        }
 
         Ok(())
     }
@@ -536,9 +567,11 @@ mod tests {
 
         for input in inputs {
             let mut scanner = Scanner::from(input.chars());
-            let token = scanner.read_token()?;
+            let Some(token) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(Token::Name(input.to_string()), token);
+            assert_eq!(Token::Name(input.to_string()), token?);
         }
 
         Ok(())
@@ -576,9 +609,11 @@ myNegativeReal -3.1456
 
         let mut scanner = Scanner::from(input.chars());
         for expect in expected_tokens {
-            let received = scanner.read_token()?;
+            let Some(received) = scanner.next() else {
+                return Err("expected token".into());
+            };
 
-            assert_eq!(expect, received);
+            assert_eq!(expect, received?);
         }
 
         Ok(())
