@@ -3,9 +3,11 @@ use scanner::Scanner;
 
 mod encoding;
 mod error;
+mod evaluator;
+mod object;
 mod scanner;
 mod stack;
-pub mod token;
+mod token;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 

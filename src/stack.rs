@@ -25,6 +25,19 @@ impl<T> Stack<T> {
     pub fn top(&self) -> Option<&T> {
         self.data.last()
     }
+
+    pub fn search<C>(&self, condition: C) -> Option<&T>
+    where
+        C: Fn(&T) -> bool,
+    {
+        for value in self.data.iter().rev() {
+            if condition(value) {
+                return Some(value);
+            }
+        }
+
+        None
+    }
 }
 
 #[cfg(test)]
@@ -61,5 +74,15 @@ mod tests {
 
         assert_eq!(Some(3), stack.top().copied());
         assert_eq!(vec![1, 2, 3], Vec::from(stack));
+    }
+
+    #[test]
+    fn test_search() {
+        let mut stack: Stack<i32> = Stack::new();
+        stack.push(1);
+        stack.push(2);
+        stack.push(3);
+
+        assert_eq!(Some(2), stack.search(|v| *v == 2).copied());
     }
 }
