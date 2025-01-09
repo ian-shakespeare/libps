@@ -50,12 +50,12 @@ where
                 Some(ch) => match ch {
                     '-' | '0'..='9' => {
                         word.push(ch);
-                        return Some(self.read_numeric(word));
+                        return Some(self.scan_numeric(word));
                     }
                     '[' | ']' | '{' | '}' => return Some(Ok(Token::Name(String::from(ch)))),
                     '.' => {
                         word.push(ch);
-                        return Some(self.read_real(word));
+                        return Some(self.scan_real(word));
                     }
                     '(' => return Some(self.read_string_literal()),
                     '<' => {
@@ -63,10 +63,17 @@ where
                             None => Err(Error::from(ErrorKind::UnterminatedString)),
                             Some('~') => self.read_string_base85(),
                             Some('<') => Ok(Token::Name(String::from("<<"))),
-                            Some(next_ch) => {
-                                word.push(next_ch);
-                                self.read_string_hex(word)
-                            }
+                            Some(next_ch) => match next_ch {
+                                '0'..='9' | 'a'..='f' | 'A'..='F' => {
+                                    word.push(next_ch);
+                                    self.read_string_hex(word)
+                                }
+                                _ => {
+                                    word.push('<');
+                                    word.push(next_ch);
+                                    self.read_name(word)
+                                }
+                            },
                         })
                     }
                     '>' => {
@@ -108,10 +115,11 @@ where
         Ok(())
     }
 
-    fn read_numeric(&mut self, mut word: String) -> crate::Result<Token> {
+    fn scan_numeric(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.input.next() {
                 None => break,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => break,
                 Some('<') => match self.input.next() {
                     Some('<') => {
                         self.unread_token = Some(Token::Name(String::from("<<")));
@@ -143,7 +151,6 @@ where
                     }
                 },
                 Some(ch) => match ch {
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => break,
                     '[' | ']' | '{' | '}' => {
                         self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
@@ -151,14 +158,14 @@ where
                     '0'..='9' => word.push(ch),
                     '.' => {
                         word.push(ch);
-                        return self.read_real(word);
+                        return self.scan_real(word);
                     }
                     '#' => {
                         if word.starts_with("-") {
                             return Err(Error::from(ErrorKind::Syntax));
                         }
                         word.push(ch);
-                        return self.read_radix(word);
+                        return self.scan_radix(word);
                     }
                     _ => {
                         word.push(ch);
@@ -177,11 +184,17 @@ where
         }
     }
 
-    fn read_real(&mut self, mut word: String) -> crate::Result<Token> {
+    fn scan_real(&mut self, mut word: String) -> crate::Result<Token> {
         let mut is_scientific = false;
         loop {
             match self.input.next() {
                 None => break,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => {
+                    if word.to_lowercase().ends_with('e') {
+                        return Err(Error::from(ErrorKind::Syntax));
+                    }
+                    break;
+                }
                 Some('<') => match self.input.next() {
                     Some('<') => {
                         self.unread_token = Some(Token::Name(String::from("<<")));
@@ -213,12 +226,6 @@ where
                     }
                 },
                 Some(ch) => match ch {
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => {
-                        if word.to_lowercase().ends_with('e') {
-                            return Err(Error::from(ErrorKind::Syntax));
-                        }
-                        break;
-                    }
                     '[' | ']' | '{' | '}' => {
                         self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
@@ -268,10 +275,16 @@ where
         }
     }
 
-    fn read_radix(&mut self, mut word: String) -> crate::Result<Token> {
+    fn scan_radix(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.input.next() {
                 None => break,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => {
+                    if word.ends_with('#') {
+                        return Err(Error::from(ErrorKind::Syntax));
+                    }
+                    break;
+                }
                 Some('<') => match self.input.next() {
                     Some('<') => {
                         self.unread_token = Some(Token::Name(String::from("<<")));
@@ -303,12 +316,6 @@ where
                     }
                 },
                 Some(ch) => match ch {
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => {
-                        if word.ends_with('#') {
-                            return Err(Error::from(ErrorKind::Syntax));
-                        }
-                        break;
-                    }
                     '[' | ']' | '{' | '}' => {
                         self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
@@ -413,9 +420,9 @@ where
         loop {
             match self.input.next() {
                 None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                Some('>') => break,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => continue,
                 Some(ch) => match ch {
-                    '>' => break,
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => continue,
                     '0'..='9' | 'a'..='z' | 'A'..='Z' => word.push(ch),
                     _ => return Err(Error::new(ErrorKind::Syntax, "invalid hex string")),
                 },
@@ -430,14 +437,12 @@ where
         loop {
             match self.input.next() {
                 None => return Err(Error::from(ErrorKind::UnterminatedString)),
-                Some(ch) => match ch {
-                    '~' => match self.input.peek() {
-                        None => return Err(Error::from(ErrorKind::UnterminatedString)),
-                        Some('>') => break,
-                        _ => continue,
-                    },
-                    _ => word.push(ch),
+                Some('~') => match self.input.peek() {
+                    None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                    Some('>') => break,
+                    _ => continue,
                 },
+                Some(ch) => word.push(ch),
             }
         }
 
@@ -448,6 +453,7 @@ where
         loop {
             match self.input.next() {
                 None => break,
+                Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => break,
                 Some('<') => match self.input.next() {
                     Some('<') => {
                         self.unread_token = Some(Token::Name(String::from("<<")));
@@ -471,7 +477,6 @@ where
                     _ => word.push('>'),
                 },
                 Some(ch) => match ch {
-                    '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => break,
                     '[' | ']' | '{' | '}' => {
                         self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
@@ -716,6 +721,7 @@ mod tests {
             "$MyDict",
             "@pattern",
             "16#FFFF.LMAO",
+            "<!F",
         ];
 
         for input in inputs {
