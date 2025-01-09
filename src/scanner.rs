@@ -8,6 +8,7 @@ use crate::{
 
 pub struct Scanner<I: Iterator<Item = char>> {
     input: iter::Peekable<I>,
+    unread_token: Option<Token>,
 }
 
 impl<I> From<I> for Scanner<I>
@@ -17,6 +18,7 @@ where
     fn from(value: I) -> Self {
         Scanner {
             input: value.peekable(),
+            unread_token: None,
         }
     }
 }
@@ -28,6 +30,11 @@ where
     type Item = crate::Result<Token>;
 
     fn next(&mut self) -> Option<Self::Item> {
+        if let Some(token) = self.unread_token.clone() {
+            self.unread_token = None;
+            return Some(Ok(token));
+        }
+
         let mut word = String::new();
         loop {
             match self.input.next() {
@@ -40,31 +47,44 @@ where
                         return Some(Err(e));
                     }
                 }
-                Some(ch) => {
-                    return Some(match ch {
-                        '-' | '0'..='9' => {
-                            word.push(ch);
-                            self.read_numeric(word)
-                        }
-                        '.' => {
-                            word.push(ch);
-                            self.read_real(word)
-                        }
-                        '(' => self.read_string_literal(),
-                        '<' => match self.input.next() {
+                Some(ch) => match ch {
+                    '-' | '0'..='9' => {
+                        word.push(ch);
+                        return Some(self.read_numeric(word));
+                    }
+                    '[' | ']' | '{' | '}' => return Some(Ok(Token::Name(String::from(ch)))),
+                    '.' => {
+                        word.push(ch);
+                        return Some(self.read_real(word));
+                    }
+                    '(' => return Some(self.read_string_literal()),
+                    '<' => {
+                        return Some(match self.input.next() {
                             None => Err(Error::from(ErrorKind::UnterminatedString)),
                             Some('~') => self.read_string_base85(),
+                            Some('<') => Ok(Token::Name(String::from("<<"))),
                             Some(next_ch) => {
                                 word.push(next_ch);
                                 self.read_string_hex(word)
                             }
-                        },
-                        _ => {
-                            word.push(ch);
-                            self.read_name(word)
-                        }
-                    });
-                }
+                        })
+                    }
+                    '>' => {
+                        return Some(match self.input.next() {
+                            None => Ok(Token::Name(String::from('>'))),
+                            Some('>') => Ok(Token::Name(String::from(">>"))),
+                            Some(ch) => {
+                                word.push('>');
+                                word.push(ch);
+                                self.read_name(word)
+                            }
+                        })
+                    }
+                    _ => {
+                        word.push(ch);
+                        return Some(self.read_name(word));
+                    }
+                },
             };
         }
     }
@@ -92,8 +112,42 @@ where
         loop {
             match self.input.next() {
                 None => break,
+                Some('<') => match self.input.next() {
+                    Some('<') => {
+                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('<');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('<');
+                        return self.read_name(word);
+                    }
+                },
+                Some('>') => match self.input.next() {
+                    Some('>') => {
+                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('>');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('>');
+                        return self.read_name(word);
+                    }
+                },
                 Some(ch) => match ch {
                     '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => break,
+                    '[' | ']' | '{' | '}' => {
+                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        break;
+                    }
                     '0'..='9' => word.push(ch),
                     '.' => {
                         word.push(ch);
@@ -114,10 +168,12 @@ where
             }
         }
 
-        if let Ok(value) = word.parse::<i32>() {
-            Ok(Token::Integer(value))
-        } else {
-            Err(Error::from(ErrorKind::Syntax))
+        match word.parse::<i32>() {
+            Ok(value) => Ok(Token::Integer(value)),
+            Err(_) => match word.parse::<f64>() {
+                Ok(value) => Ok(Token::Real(value)),
+                Err(_) => Err(Error::from(ErrorKind::Syntax)),
+            },
         }
     }
 
@@ -126,11 +182,45 @@ where
         loop {
             match self.input.next() {
                 None => break,
+                Some('<') => match self.input.next() {
+                    Some('<') => {
+                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('<');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('<');
+                        return self.read_name(word);
+                    }
+                },
+                Some('>') => match self.input.next() {
+                    Some('>') => {
+                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('>');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('>');
+                        return self.read_name(word);
+                    }
+                },
                 Some(ch) => match ch {
                     '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => {
                         if word.to_lowercase().ends_with('e') {
                             return Err(Error::from(ErrorKind::Syntax));
                         }
+                        break;
+                    }
+                    '[' | ']' | '{' | '}' => {
+                        self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
                     }
                     'e' | 'E' => {
@@ -182,11 +272,45 @@ where
         loop {
             match self.input.next() {
                 None => break,
+                Some('<') => match self.input.next() {
+                    Some('<') => {
+                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('<');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('<');
+                        return self.read_name(word);
+                    }
+                },
+                Some('>') => match self.input.next() {
+                    Some('>') => {
+                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('>');
+                        word.push(ch);
+                        return self.read_name(word);
+                    }
+                    _ => {
+                        word.push('>');
+                        return self.read_name(word);
+                    }
+                },
                 Some(ch) => match ch {
                     '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => {
                         if word.ends_with('#') {
                             return Err(Error::from(ErrorKind::Syntax));
                         }
+                        break;
+                    }
+                    '[' | ']' | '{' | '}' => {
+                        self.unread_token = Some(Token::Name(String::from(ch)));
                         break;
                     }
                     '0'..='9' | 'a'..='z' | 'A'..='Z' => word.push(ch),
@@ -324,8 +448,34 @@ where
         loop {
             match self.input.next() {
                 None => break,
+                Some('<') => match self.input.next() {
+                    Some('<') => {
+                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('<');
+                        word.push(ch);
+                    }
+                    _ => word.push('<'),
+                },
+                Some('>') => match self.input.next() {
+                    Some('>') => {
+                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        break;
+                    }
+                    Some(ch) => {
+                        word.push('>');
+                        word.push(ch);
+                    }
+                    _ => word.push('>'),
+                },
                 Some(ch) => match ch {
                     '\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C' => break,
+                    '[' | ']' | '{' | '}' => {
+                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        break;
+                    }
                     _ => word.push(ch),
                 },
             }
@@ -354,11 +504,11 @@ mod tests {
         let inputs = ["1x0", "1.x0"];
         for input in inputs {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::Name(String::from(input)), token?);
+            assert_eq!(Token::Name(String::from(input)), token);
         }
 
         Ok(())
@@ -370,6 +520,7 @@ mod tests {
             ("1", Token::Integer(1)),
             ("-1", Token::Integer(-1)),
             ("1234567890", Token::Integer(1_234_567_890)),
+            ("2147483648", Token::Real(2147483648.0)),
             (".1", Token::Real(0.1)),
             ("-.1", Token::Real(-0.1)),
             ("1.234567890", Token::Real(1.23456789)),
@@ -387,11 +538,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(expect, token?);
+            assert_eq!(expect, token);
         }
 
         Ok(())
@@ -432,11 +583,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(String::from(expect)), token?);
+            assert_eq!(Token::String(String::from(expect)), token);
         }
 
         Ok(())
@@ -461,11 +612,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(String::from(expect)), token?);
+            assert_eq!(Token::String(String::from(expect)), token);
         }
 
         Ok(())
@@ -474,11 +625,11 @@ mod tests {
     #[test]
     fn test_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
         let mut scanner = Scanner::from("(\\ii)".chars());
-        let Some(token) = scanner.next() else {
+        let Some(Ok(token)) = scanner.next() else {
             return Err("expected token".into());
         };
 
-        assert_eq!(Token::String(String::from("ii")), token?);
+        assert_eq!(Token::String(String::from("ii")), token);
         Ok(())
     }
 
@@ -488,11 +639,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(expect.to_string()), token?);
+            assert_eq!(Token::String(expect.to_string()), token);
         }
 
         Ok(())
@@ -511,11 +662,11 @@ mod tests {
 
         for (input, expect) in cases {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(expect.to_string()), token?);
+            assert_eq!(Token::String(expect.to_string()), token);
         }
 
         Ok(())
@@ -525,11 +676,11 @@ mod tests {
     fn test_base85_string() -> Result<(), Box<dyn error::Error>> {
         let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
         let mut scanner = Scanner::from(input.chars());
-        let Some(token) = scanner.next() else {
+        let Some(Ok(token)) = scanner.next() else {
             return Err("expected token".into());
         };
 
-        assert_eq!(Token::String(String::from("this is some text")), token?);
+        assert_eq!(Token::String(String::from("this is some text")), token);
 
         Ok(())
     }
@@ -544,10 +695,10 @@ mod tests {
             "this is a hex string",
             "this is a base85 string",
         ] {
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
-            assert_eq!(Token::String(expected.to_string()), token?);
+            assert_eq!(Token::String(expected.to_string()), token);
         }
 
         Ok(())
@@ -569,11 +720,53 @@ mod tests {
 
         for input in inputs {
             let mut scanner = Scanner::from(input.chars());
-            let Some(token) = scanner.next() else {
+            let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::Name(input.to_string()), token?);
+            assert_eq!(Token::Name(input.to_string()), token);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_self_deliminating() -> Result<(), Box<dyn error::Error>> {
+        let inputs = [
+            ("mid[dle", "["),
+            ("mid]dle", "]"),
+            ("mid{dle", "{"),
+            ("mid}dle", "}"),
+            ("mid<<dle", "<<"),
+            ("mid>>dle", ">>"),
+            ("1[2", "["),
+            ("1]2", "]"),
+            ("1{2", "{"),
+            ("1}2", "}"),
+            ("1<<2", "<<"),
+            ("1>>2", ">>"),
+            ("1.2[3", "["),
+            ("1.2]3", "]"),
+            ("1.2{3", "{"),
+            ("1.2}3", "}"),
+            ("1.2<<3", "<<"),
+            ("1.2>>3", ">>"),
+            ("16#FF[FF", "["),
+            ("16#FF]FF", "]"),
+            ("16#FF{FF", "{"),
+            ("16#FF}FF", "}"),
+            ("16#FF<<FF", "<<"),
+            ("16#FF>>FF", ">>"),
+        ];
+
+        for (input, expect) in inputs {
+            let mut scanner = Scanner::from(input.chars());
+            let _ = scanner.next();
+
+            let Some(Ok(token)) = scanner.next() else {
+                return Err("expected token".into());
+            };
+            assert_eq!(Token::Name(expect.to_string()), token);
         }
 
         Ok(())
@@ -611,11 +804,11 @@ myNegativeReal -3.1456
 
         let mut scanner = Scanner::from(input.chars());
         for expect in expected_tokens {
-            let Some(received) = scanner.next() else {
+            let Some(Ok(received)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(expect, received?);
+            assert_eq!(expect, received);
         }
 
         Ok(())
