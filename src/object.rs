@@ -1,17 +1,17 @@
-use std::{collections, fs, hash};
+use std::{collections, hash, rc};
 
-#[derive(Debug)]
-pub enum Object<'a> {
+#[derive(Clone, Debug)]
+pub enum Object {
     Integer(i32),
     Real(f64),
     Boolean(bool),
-    Array(&'a Vec<Object<'a>>),
-    PackedArray(&'a Vec<Object<'a>>),
+    Array(rc::Rc<Vec<Object>>),
+    PackedArray(rc::Rc<Vec<Object>>),
     String(String),
     Name(String),
-    Dictionary(&'a collections::HashMap<Object<'a>, Object<'a>>),
+    Dictionary(rc::Rc<collections::HashMap<String, Object>>),
     Operator(String),
-    File(fs::File),
+    // File(Box<fs::File>),
     Mark,
     Null,
     Save,
@@ -19,7 +19,43 @@ pub enum Object<'a> {
     GState,
 }
 
-impl hash::Hash for Object<'_> {
+impl From<Object> for String {
+    fn from(value: Object) -> Self {
+        match value {
+            Object::Integer(value) => value.to_string(),
+            Object::Real(value) => value.to_string(),
+            Object::Boolean(value) => value.to_string(),
+            Object::String(value) | Object::Name(value) => value,
+            Object::Array(values) => {
+                let mut output = String::from('[');
+                for obj in values.iter() {
+                    output.push_str(&format!(" {}", &String::from(obj.clone())))
+                }
+                output.push_str(" ]");
+                output
+            }
+            Object::PackedArray(values) => {
+                let mut output = String::from('{');
+                for obj in values.iter() {
+                    output.push_str(&format!(" {}", &String::from(obj.clone())))
+                }
+                output.push_str(" }");
+                output
+            }
+            Object::Dictionary(values) => {
+                let mut output = String::from("<<");
+                for (key, value) in values.iter() {
+                    output.push_str(&format!(" {} {}", &key, &String::from(value.clone())));
+                }
+                output.push_str(" >>");
+                output
+            }
+            _ => "".to_string(),
+        }
+    }
+}
+
+impl hash::Hash for Object {
     fn hash<H: hash::Hasher>(&self, state: &mut H) {
         match self {
             Self::Real(value) => f64::to_bits(*value).hash(state),
@@ -28,7 +64,6 @@ impl hash::Hash for Object<'_> {
                     key.hash(state);
                 }
             }
-            Self::File(_) => "Object::File".hash(state),
             Self::Mark => "Object::Mark".hash(state),
             Self::Null => "Object::Null".hash(state),
             Self::Save => "Object::Save".hash(state),
@@ -45,7 +80,7 @@ impl hash::Hash for Object<'_> {
     }
 }
 
-impl PartialEq for Object<'_> {
+impl PartialEq for Object {
     fn eq(&self, other: &Self) -> bool {
         match self {
             Self::Integer(value) => match other {
@@ -93,9 +128,9 @@ impl PartialEq for Object<'_> {
                     false
                 }
             }
-            _ => return false,
+            _ => false,
         }
     }
 }
 
-impl Eq for Object<'_> {}
+impl Eq for Object {}

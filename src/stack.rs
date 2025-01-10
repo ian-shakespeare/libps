@@ -3,6 +3,12 @@ pub struct Stack<T> {
     data: Vec<T>,
 }
 
+impl<T> Default for Stack<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> From<Stack<T>> for Vec<T> {
     fn from(value: Stack<T>) -> Self {
         value.data
@@ -30,13 +36,7 @@ impl<T> Stack<T> {
     where
         C: Fn(&T) -> bool,
     {
-        for value in self.data.iter().rev() {
-            if condition(value) {
-                return Some(value);
-            }
-        }
-
-        None
+        self.data.iter().rev().find(|&value| condition(value))
     }
 }
 

@@ -5,6 +5,9 @@ pub enum ErrorKind {
     Unknown,
     UnexpectedEof,
     UnterminatedString,
+    UnterminatedArray,
+    UnterminatedDictionary,
+    MissingValue,
     Syntax,
 }
 
@@ -14,6 +17,9 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::Unknown => "ERR_UNKNOWN",
             ErrorKind::UnexpectedEof => "ERR_UNEXPECTED_EOF",
             ErrorKind::UnterminatedString => "ERR_UNTERMINATED_STR",
+            ErrorKind::UnterminatedArray => "ERR_UNTERMINATED_ARRAY",
+            ErrorKind::UnterminatedDictionary => "ERR_UNTERMINATED_DICT",
+            ErrorKind::MissingValue => "ERR_MISSING_VALUE",
             ErrorKind::Syntax => "ERR_SYNTAX",
         }
     }
