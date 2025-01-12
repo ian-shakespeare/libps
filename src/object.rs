@@ -1,4 +1,4 @@
-use std::{collections, hash, rc};
+use std::{collections, rc};
 
 #[derive(Clone, Debug)]
 pub enum Object {
@@ -8,6 +8,7 @@ pub enum Object {
     Array(rc::Rc<Vec<Object>>),
     PackedArray(rc::Rc<Vec<Object>>),
     String(String),
+    LiteralName(String),
     Name(String),
     Dictionary(rc::Rc<collections::HashMap<String, Object>>),
     Operator(String),
@@ -51,31 +52,6 @@ impl From<Object> for String {
                 output
             }
             _ => "".to_string(),
-        }
-    }
-}
-
-impl hash::Hash for Object {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
-        match self {
-            Self::Real(value) => f64::to_bits(*value).hash(state),
-            Self::Dictionary(value) => {
-                for key in value.keys() {
-                    key.hash(state);
-                }
-            }
-            Self::Mark => "Object::Mark".hash(state),
-            Self::Null => "Object::Null".hash(state),
-            Self::Save => "Object::Save".hash(state),
-            Self::FontId => "Object::FontId".hash(state),
-            Self::GState => "Object::GState".hash(state),
-            Self::Integer(value) => value.hash(state),
-            Self::Boolean(value) => value.hash(state),
-            Self::Array(value) => value.hash(state),
-            Self::PackedArray(value) => value.hash(state),
-            Self::String(value) => value.hash(state),
-            Self::Name(value) => value.hash(state),
-            Self::Operator(value) => value.hash(state),
         }
     }
 }
