@@ -2,6 +2,7 @@ use std::collections;
 
 use crate::{object::Object, stack::Stack};
 
+#[allow(dead_code)]
 pub enum Defined {
     Object(Object),
     Function(fn(&mut Stack<Object>, &mut Stack<Object>)),
