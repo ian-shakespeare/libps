@@ -1,6 +1,6 @@
 use std::io;
 
-use libps::scan;
+use libps::eval;
 
 fn main() {
     let input = io::stdin();
@@ -9,5 +9,6 @@ fn main() {
         panic!("Failed to read input.");
     }
 
-    scan(&buf);
+    eval(&buf);
+    // scan(&buf);
 }

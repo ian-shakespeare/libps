@@ -11,7 +11,6 @@ pub enum Object {
     LiteralName(String),
     Name(String),
     Dictionary(rc::Rc<collections::HashMap<String, Object>>),
-    Operator(String),
     // File(Box<fs::File>),
     Mark,
     Null,
