@@ -38,6 +38,10 @@ impl<T> Stack<T> {
     {
         self.data.iter().rev().find(|&value| condition(value))
     }
+
+    pub fn clear(&mut self) {
+        self.data.clear();
+    }
 }
 
 #[cfg(test)]
@@ -84,5 +88,16 @@ mod tests {
         stack.push(3);
 
         assert_eq!(Some(2), stack.search(|v| *v == 2).copied());
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut stack: Stack<i32> = Stack::new();
+        stack.push(1);
+        stack.push(2);
+        stack.push(3);
+        stack.clear();
+
+        assert_eq!(None, stack.top());
     }
 }
