@@ -60,7 +60,7 @@ where
                     '(' => return Some(self.read_string_literal()),
                     '<' => {
                         return Some(match self.input.next() {
-                            None => Err(Error::from(ErrorKind::UnterminatedString)),
+                            None => Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                             Some('~') => self.read_string_base85(),
                             Some('<') => Ok(Token::Name(String::from("<<"))),
                             Some(next_ch) => match next_ch {
@@ -352,7 +352,7 @@ where
 
         loop {
             match self.input.next() {
-                None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                None => return Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                 Some(ch) => match ch {
                     '(' => {
                         word.push(ch);
@@ -367,7 +367,7 @@ where
                     }
                     '\\' => {
                         let next_ch = match self.input.next() {
-                            None => Err(Error::from(ErrorKind::UnexpectedEof)),
+                            None => Err(Error::new(ErrorKind::IoError, "unexpected eof")),
                             Some(next_ch) => Ok(next_ch),
                         }?;
                         match next_ch {
@@ -381,7 +381,12 @@ where
                             '(' => word.push('('),
                             ')' => word.push(')'),
                             '\r' => match self.input.peek() {
-                                None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                                None => {
+                                    return Err(Error::new(
+                                        ErrorKind::Syntax,
+                                        "unterminated string",
+                                    ))
+                                }
                                 Some('\n') => {
                                     let _ = self.input.next();
                                 }
@@ -419,7 +424,7 @@ where
     fn read_string_hex(&mut self, mut word: String) -> crate::Result<Token> {
         loop {
             match self.input.next() {
-                None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                None => return Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                 Some('>') => break,
                 Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => continue,
                 Some(ch) => match ch {
@@ -436,9 +441,9 @@ where
         let mut word = String::new();
         loop {
             match self.input.next() {
-                None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                None => return Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                 Some('~') => match self.input.peek() {
-                    None => return Err(Error::from(ErrorKind::UnterminatedString)),
+                    None => return Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                     Some('>') => break,
                     _ => continue,
                 },
@@ -562,7 +567,7 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert!(token.is_err_and(|e| e.kind() == ErrorKind::UnterminatedString));
+            assert!(token.is_err_and(|e| e.kind() == ErrorKind::Syntax));
         }
 
         Ok(())

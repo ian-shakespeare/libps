@@ -38,7 +38,10 @@ where
                         loop {
                             match self.input.peek() {
                                 None => {
-                                    return Some(Err(Error::from(ErrorKind::UnterminatedArray)))
+                                    return Some(Err(Error::new(
+                                        ErrorKind::Syntax,
+                                        "unterminated array",
+                                    )))
                                 }
                                 Some(token) => {
                                     if let Token::Name(n) = token {
@@ -50,9 +53,7 @@ where
                                     match self.next() {
                                         Some(Ok(obj)) => arr.push(obj),
                                         _ => {
-                                            return Some(Err(Error::from(
-                                                ErrorKind::UnterminatedArray,
-                                            )))
+                                            return Some(Err(Error::from(ErrorKind::Syntax)));
                                         }
                                     }
                                 }
@@ -65,7 +66,10 @@ where
                         loop {
                             match self.input.peek() {
                                 None => {
-                                    return Some(Err(Error::from(ErrorKind::UnterminatedArray)))
+                                    return Some(Err(Error::new(
+                                        ErrorKind::Syntax,
+                                        "unterminated array",
+                                    )))
                                 }
                                 Some(token) => {
                                     if let Token::Name(n) = token {
@@ -77,8 +81,9 @@ where
                                     match self.next() {
                                         Some(Ok(obj)) => arr.push(obj),
                                         _ => {
-                                            return Some(Err(Error::from(
-                                                ErrorKind::UnterminatedArray,
+                                            return Some(Err(Error::new(
+                                                ErrorKind::Syntax,
+                                                "unterminated array",
                                             )))
                                         }
                                     }
@@ -92,8 +97,9 @@ where
                         loop {
                             match self.input.peek() {
                                 None => {
-                                    return Some(Err(Error::from(
-                                        ErrorKind::UnterminatedDictionary,
+                                    return Some(Err(Error::new(
+                                        ErrorKind::Syntax,
+                                        "unterminated dict",
                                     )))
                                 }
                                 Some(token) => {
@@ -107,8 +113,9 @@ where
                                         (Some(Ok(key_obj)), Some(Ok(value_obj))) => {
                                             if let Object::Name(ref n) = value_obj {
                                                 if n == ">>" {
-                                                    return Some(Err(Error::from(
-                                                        ErrorKind::MissingValue,
+                                                    return Some(Err(Error::new(
+                                                        ErrorKind::Syntax,
+                                                        "missing value",
                                                     )));
                                                 }
                                             }
@@ -116,8 +123,9 @@ where
                                             dict.insert(key, value_obj);
                                         }
                                         _ => {
-                                            return Some(Err(Error::from(
-                                                ErrorKind::UnterminatedDictionary,
+                                            return Some(Err(Error::new(
+                                                ErrorKind::Syntax,
+                                                "unterminated dict",
                                             )))
                                         }
                                     }
@@ -142,58 +150,34 @@ mod tests {
 
     #[test]
     fn test_unterminated() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            (
-                vec![Token::Name("[".to_string())],
-                ErrorKind::UnterminatedArray,
-            ),
-            (
-                vec![Token::Name("[".to_string()), Token::Integer(1)],
-                ErrorKind::UnterminatedArray,
-            ),
-            (
-                vec![Token::Name("{".to_string())],
-                ErrorKind::UnterminatedArray,
-            ),
-            (
-                vec![Token::Name("{".to_string()), Token::Integer(1)],
-                ErrorKind::UnterminatedArray,
-            ),
-            (
-                vec![Token::Name("<<".to_string())],
-                ErrorKind::UnterminatedDictionary,
-            ),
-            (
-                vec![
-                    Token::Name("<<".to_string()),
-                    Token::Name("key".to_string()),
-                ],
-                ErrorKind::UnterminatedDictionary,
-            ),
-            (
-                vec![
-                    Token::Name("<<".to_string()),
-                    Token::Name("key".to_string()),
-                    Token::String("value".to_string()),
-                ],
-                ErrorKind::UnterminatedDictionary,
-            ),
-            (
-                vec![
-                    Token::Name("<<".to_string()),
-                    Token::Name("key".to_string()),
-                    Token::Name(">>".to_string()),
-                ],
-                ErrorKind::MissingValue,
-            ),
+        let inputs = [
+            vec![Token::Name("[".to_string())],
+            vec![Token::Name("[".to_string()), Token::Integer(1)],
+            vec![Token::Name("{".to_string())],
+            vec![Token::Name("{".to_string()), Token::Integer(1)],
+            vec![Token::Name("<<".to_string())],
+            vec![
+                Token::Name("<<".to_string()),
+                Token::Name("key".to_string()),
+            ],
+            vec![
+                Token::Name("<<".to_string()),
+                Token::Name("key".to_string()),
+                Token::String("value".to_string()),
+            ],
+            vec![
+                Token::Name("<<".to_string()),
+                Token::Name("key".to_string()),
+                Token::Name(">>".to_string()),
+            ],
         ];
 
-        for (input, expect) in cases {
+        for input in inputs {
             let Some(obj) = Tokenizer::from(input.into_iter()).next() else {
                 return Err("expected object".into());
             };
             assert!(obj.is_err());
-            assert_eq!(expect, obj.unwrap_err().kind());
+            assert_eq!(ErrorKind::Syntax, obj.unwrap_err().kind());
         }
 
         Ok(())

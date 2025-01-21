@@ -2,25 +2,25 @@ use std::fmt;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ErrorKind {
-    Unknown,
-    UnexpectedEof,
-    UnterminatedString,
-    UnterminatedArray,
-    UnterminatedDictionary,
-    MissingValue,
+    IoError,
+    StackUnderflow,
     Syntax,
+    TypeCheck,
+    Undefined,
+    UndefinedResult,
+    Unregistered,
 }
 
 impl From<ErrorKind> for &'static str {
     fn from(value: ErrorKind) -> Self {
         match value {
-            ErrorKind::Unknown => "ERR_UNKNOWN",
-            ErrorKind::UnexpectedEof => "ERR_UNEXPECTED_EOF",
-            ErrorKind::UnterminatedString => "ERR_UNTERMINATED_STR",
-            ErrorKind::UnterminatedArray => "ERR_UNTERMINATED_ARRAY",
-            ErrorKind::UnterminatedDictionary => "ERR_UNTERMINATED_DICT",
-            ErrorKind::MissingValue => "ERR_MISSING_VALUE",
-            ErrorKind::Syntax => "ERR_SYNTAX",
+            ErrorKind::IoError => "ioerror",
+            ErrorKind::StackUnderflow => "stackunderflow",
+            ErrorKind::Syntax => "syntaxerror",
+            ErrorKind::TypeCheck => "typecheck",
+            ErrorKind::Undefined => "undefined",
+            ErrorKind::UndefinedResult => "undefinedresult",
+            ErrorKind::Unregistered => "unregistered",
         }
     }
 }

@@ -9,6 +9,7 @@ fn main() {
         panic!("Failed to read input.");
     }
 
-    eval(&buf);
-    // scan(&buf);
+    if let Err(e) = eval(&buf) {
+        println!("{}", e);
+    }
 }

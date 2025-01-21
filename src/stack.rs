@@ -42,6 +42,10 @@ impl<T> Stack<T> {
     pub fn clear(&mut self) {
         self.data.clear();
     }
+
+    pub fn count(&self) -> usize {
+        self.data.len()
+    }
 }
 
 #[cfg(test)]
@@ -99,5 +103,19 @@ mod tests {
         stack.clear();
 
         assert_eq!(None, stack.top());
+    }
+
+    #[test]
+    fn test_count() {
+        let mut stack: Stack<i32> = Stack::new();
+        assert_eq!(0, stack.count());
+
+        stack.push(1);
+        stack.push(2);
+        stack.push(3);
+        assert_eq!(3, stack.count());
+
+        let _ = stack.pop();
+        assert_eq!(2, stack.count());
     }
 }
