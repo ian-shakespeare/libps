@@ -70,4 +70,16 @@ fn load_system_operators(dict: &mut collections::HashMap<String, Defined>) {
     dict.insert("mul".to_string(), Defined::Function(operator::mul));
     dict.insert("sub".to_string(), Defined::Function(operator::sub));
     dict.insert("abs".to_string(), Defined::Function(operator::abs));
+    dict.insert("neg".to_string(), Defined::Function(operator::neg));
+    dict.insert("ceiling".to_string(), Defined::Function(operator::ceiling));
+    dict.insert("floor".to_string(), Defined::Function(operator::floor));
+    dict.insert("round".to_string(), Defined::Function(operator::round));
+    dict.insert(
+        "truncate".to_string(),
+        Defined::Function(operator::truncate),
+    );
+    dict.insert("sqrt".to_string(), Defined::Function(operator::sqrt));
+    dict.insert("atan".to_string(), Defined::Function(operator::atan));
+    dict.insert("cos".to_string(), Defined::Function(operator::cos));
+    dict.insert("sin".to_string(), Defined::Function(operator::sin));
 }
