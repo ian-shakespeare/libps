@@ -1,8 +1,7 @@
 use std::iter;
 
 use crate::{
-    encoding::{decode_ascii85, decode_hex},
-    token::Token,
+    token::{Token, TokenKind},
     Error, ErrorKind,
 };
 
@@ -52,7 +51,9 @@ where
                         word.push(ch);
                         return Some(self.scan_numeric(word));
                     }
-                    '[' | ']' | '{' | '}' => return Some(Ok(Token::Name(String::from(ch)))),
+                    '[' | ']' | '{' | '}' => {
+                        return Some(Ok(Token::new(TokenKind::Name, ch.to_string())))
+                    }
                     '.' => {
                         word.push(ch);
                         return Some(self.scan_real(word));
@@ -62,7 +63,7 @@ where
                         return Some(match self.input.next() {
                             None => Err(Error::new(ErrorKind::Syntax, "unterminated string")),
                             Some('~') => self.read_string_base85(),
-                            Some('<') => Ok(Token::Name(String::from("<<"))),
+                            Some('<') => Ok(Token::new(TokenKind::Name, "<<".to_string())),
                             Some(next_ch) => match next_ch {
                                 '0'..='9' | 'a'..='f' | 'A'..='F' => {
                                     word.push(next_ch);
@@ -78,8 +79,8 @@ where
                     }
                     '>' => {
                         return Some(match self.input.next() {
-                            None => Ok(Token::Name(String::from('>'))),
-                            Some('>') => Ok(Token::Name(String::from(">>"))),
+                            None => Ok(Token::new(TokenKind::Name, '>'.to_string())),
+                            Some('>') => Ok(Token::new(TokenKind::Name, ">>".to_string())),
                             Some(ch) => {
                                 word.push('>');
                                 word.push(ch);
@@ -122,7 +123,7 @@ where
                 Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => break,
                 Some('<') => match self.input.next() {
                     Some('<') => {
-                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, "<<".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -137,7 +138,7 @@ where
                 },
                 Some('>') => match self.input.next() {
                     Some('>') => {
-                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ">>".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -152,7 +153,7 @@ where
                 },
                 Some(ch) => match ch {
                     '[' | ']' | '{' | '}' => {
-                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ch.to_string()));
                         break;
                     }
                     '0'..='9' => word.push(ch),
@@ -175,17 +176,10 @@ where
             }
         }
 
-        match word.parse::<i32>() {
-            Ok(value) => Ok(Token::Integer(value)),
-            Err(_) => match word.parse::<f64>() {
-                Ok(value) => Ok(Token::Real(value)),
-                Err(_) => Err(Error::from(ErrorKind::Syntax)),
-            },
-        }
+        Ok(Token::new(TokenKind::Integer, word))
     }
 
     fn scan_real(&mut self, mut word: String) -> crate::Result<Token> {
-        let mut is_scientific = false;
         loop {
             match self.input.next() {
                 None => break,
@@ -197,7 +191,7 @@ where
                 }
                 Some('<') => match self.input.next() {
                     Some('<') => {
-                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, "<<".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -212,7 +206,7 @@ where
                 },
                 Some('>') => match self.input.next() {
                     Some('>') => {
-                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ">>".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -227,14 +221,13 @@ where
                 },
                 Some(ch) => match ch {
                     '[' | ']' | '{' | '}' => {
-                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ch.to_string()));
                         break;
                     }
                     'e' | 'E' => {
                         if word.to_lowercase().contains('e') {
                             return self.read_name(word);
                         }
-                        is_scientific = true;
                         word.push('e');
                     }
                     '-' => {
@@ -252,27 +245,7 @@ where
             }
         }
 
-        if is_scientific {
-            let mut parts = word.split('e');
-            match (parts.next(), parts.next()) {
-                (Some(decimal), Some(exponent)) => {
-                    match (decimal.parse::<f64>(), exponent.parse::<i32>()) {
-                        (Ok(decimal), Ok(exponent)) => {
-                            let value = decimal * 10.0_f64.powi(exponent);
-                            return Ok(Token::Real(value));
-                        }
-                        _ => Err(Error::from(ErrorKind::Syntax)),
-                    }
-                }
-                _ => Err(Error::from(ErrorKind::Syntax)),
-            }?;
-        }
-
-        if let Ok(value) = word.parse::<f64>() {
-            Ok(Token::Real(value))
-        } else {
-            Err(Error::from(ErrorKind::Syntax))
-        }
+        Ok(Token::new(TokenKind::Real, word))
     }
 
     fn scan_radix(&mut self, mut word: String) -> crate::Result<Token> {
@@ -287,7 +260,7 @@ where
                 }
                 Some('<') => match self.input.next() {
                     Some('<') => {
-                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, "<<".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -302,7 +275,7 @@ where
                 },
                 Some('>') => match self.input.next() {
                     Some('>') => {
-                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ">>".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -317,7 +290,7 @@ where
                 },
                 Some(ch) => match ch {
                     '[' | ']' | '{' | '}' => {
-                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ch.to_string()));
                         break;
                     }
                     '0'..='9' | 'a'..='z' | 'A'..='Z' => word.push(ch),
@@ -329,21 +302,7 @@ where
             }
         }
 
-        let mut parts = word.split('#');
-        match (parts.next(), parts.next()) {
-            (Some(base), Some(digits)) => {
-                if let Ok(base) = base.parse::<u32>() {
-                    if let Ok(value) = i32::from_str_radix(digits, base) {
-                        Ok(Token::Integer(value))
-                    } else {
-                        Err(Error::from(ErrorKind::Syntax))
-                    }
-                } else {
-                    Err(Error::from(ErrorKind::Syntax))
-                }
-            }
-            _ => Err(Error::from(ErrorKind::Syntax)),
-        }
+        Ok(Token::new(TokenKind::Integer, word))
     }
 
     fn read_string_literal(&mut self) -> crate::Result<Token> {
@@ -418,7 +377,7 @@ where
             }
         }
 
-        Ok(Token::String(word))
+        Ok(Token::new(TokenKind::StringLiteral, word))
     }
 
     fn read_string_hex(&mut self, mut word: String) -> crate::Result<Token> {
@@ -434,7 +393,7 @@ where
             }
         }
 
-        Ok(Token::String(decode_hex(&word)?))
+        Ok(Token::new(TokenKind::StringHex, word))
     }
 
     fn read_string_base85(&mut self) -> crate::Result<Token> {
@@ -451,7 +410,7 @@ where
             }
         }
 
-        Ok(Token::String(decode_ascii85(&word)?))
+        Ok(Token::new(TokenKind::StringBase85, word))
     }
 
     fn read_name(&mut self, mut word: String) -> crate::Result<Token> {
@@ -461,7 +420,7 @@ where
                 Some('\0' | ' ' | '\t' | '\r' | '\n' | '\x08' | '\x0C') => break,
                 Some('<') => match self.input.next() {
                     Some('<') => {
-                        self.unread_token = Some(Token::Name(String::from("<<")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, "<<".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -472,7 +431,7 @@ where
                 },
                 Some('>') => match self.input.next() {
                     Some('>') => {
-                        self.unread_token = Some(Token::Name(String::from(">>")));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ">>".to_string()));
                         break;
                     }
                     Some(ch) => {
@@ -483,7 +442,7 @@ where
                 },
                 Some(ch) => match ch {
                     '[' | ']' | '{' | '}' => {
-                        self.unread_token = Some(Token::Name(String::from(ch)));
+                        self.unread_token = Some(Token::new(TokenKind::Name, ch.to_string()));
                         break;
                     }
                     _ => word.push(ch),
@@ -491,7 +450,7 @@ where
             }
         }
 
-        Ok(Token::Name(word))
+        Ok(Token::new(TokenKind::Name, word))
     }
 }
 
@@ -518,7 +477,7 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::Name(String::from(input)), token);
+            assert_eq!(TokenKind::Name, token.kind());
         }
 
         Ok(())
@@ -527,23 +486,23 @@ mod tests {
     #[test]
     fn test_numeric() -> Result<(), Box<dyn error::Error>> {
         let cases = [
-            ("1", Token::Integer(1)),
-            ("-1", Token::Integer(-1)),
-            ("1234567890", Token::Integer(1_234_567_890)),
-            ("2147483648", Token::Real(2147483648.0)),
-            (".1", Token::Real(0.1)),
-            ("-.1", Token::Real(-0.1)),
-            ("1.234567890", Token::Real(1.23456789)),
-            ("1.2E7", Token::Real(12_000_000.0)),
-            ("1.2e7", Token::Real(12_000_000.0)),
-            ("-1.2e7", Token::Real(-12_000_000.0)),
-            ("1.2e-7", Token::Real(0.00000012)),
-            ("-1.2e-7", Token::Real(-0.00000012)),
-            ("2#1000", Token::Integer(0b1000)),
-            ("8#1777", Token::Integer(0o1777)),
-            ("16#fffe", Token::Integer(0xFFFE)),
-            ("16#FFFE", Token::Integer(0xFFFE)),
-            ("16#ffFE", Token::Integer(0xFFFE)),
+            ("1", TokenKind::Integer),
+            ("-1", TokenKind::Integer),
+            ("1234567890", TokenKind::Integer),
+            ("2147483648", TokenKind::Integer),
+            (".1", TokenKind::Real),
+            ("-.1", TokenKind::Real),
+            ("1.234567890", TokenKind::Real),
+            ("1.2E7", TokenKind::Real),
+            ("1.2e7", TokenKind::Real),
+            ("-1.2e7", TokenKind::Real),
+            ("1.2e-7", TokenKind::Real),
+            ("-1.2e-7", TokenKind::Real),
+            ("2#1000", TokenKind::Integer),
+            ("8#1777", TokenKind::Integer),
+            ("16#fffe", TokenKind::Integer),
+            ("16#FFFE", TokenKind::Integer),
+            ("16#ffFE", TokenKind::Integer),
         ];
 
         for (input, expect) in cases {
@@ -552,7 +511,7 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(expect, token);
+            assert_eq!(expect, token.kind());
         }
 
         Ok(())
@@ -597,7 +556,8 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(String::from(expect)), token);
+            assert_eq!(TokenKind::StringLiteral, token.kind());
+            assert_eq!(expect, token.value());
         }
 
         Ok(())
@@ -626,7 +586,8 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(String::from(expect)), token);
+            assert_eq!(TokenKind::StringLiteral, token.kind());
+            assert_eq!(expect, token.value());
         }
 
         Ok(())
@@ -639,7 +600,8 @@ mod tests {
             return Err("expected token".into());
         };
 
-        assert_eq!(Token::String(String::from("ii")), token);
+        assert_eq!(TokenKind::StringLiteral, token.kind());
+        assert_eq!("ii", token.value());
         Ok(())
     }
 
@@ -653,7 +615,8 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(expect.to_string()), token);
+            assert_eq!(TokenKind::StringLiteral, token.kind());
+            assert_eq!(expect, token.value());
         }
 
         Ok(())
@@ -661,22 +624,22 @@ mod tests {
 
     #[test]
     fn test_hex_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("<736F6D65>", "some"),
-            ("<736f6d65>", "some"),
-            ("<736f6D65>", "some"),
-            ("<73 6F 6D 65>", "some"),
-            ("<70756D7>", "pump"),
-            ("<70756D70>", "pump"),
+        let inputs = [
+            "<736F6D65>",    // some
+            "<736f6d65>",    // some
+            "<736f6D65>",    // some
+            "<73 6F 6D 65>", // some
+            "<70756D7>",     // pump
+            "<70756D70>",    // pump
         ];
 
-        for (input, expect) in cases {
+        for input in inputs {
             let mut scanner = Scanner::from(input.chars());
             let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::String(expect.to_string()), token);
+            assert_eq!(TokenKind::StringHex, token.kind());
         }
 
         Ok(())
@@ -684,31 +647,34 @@ mod tests {
 
     #[test]
     fn test_base85_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
+        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>"; // this is some text
         let mut scanner = Scanner::from(input.chars());
         let Some(Ok(token)) = scanner.next() else {
             return Err("expected token".into());
         };
 
-        assert_eq!(Token::String(String::from("this is some text")), token);
+        assert_eq!(TokenKind::StringBase85, token.kind());
 
         Ok(())
     }
 
     #[test]
     fn test_multiple_string() -> Result<(), Box<dyn error::Error>> {
+        // this is a literal string
+        // this is a hex string
+        // this is a base85 string
         let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
         let mut scanner = Scanner::from(input.chars());
 
         for expected in [
-            "this is a literal string",
-            "this is a hex string",
-            "this is a base85 string",
+            TokenKind::StringLiteral,
+            TokenKind::StringHex,
+            TokenKind::StringBase85,
         ] {
             let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
-            assert_eq!(Token::String(expected.to_string()), token);
+            assert_eq!(expected, token.kind());
         }
 
         Ok(())
@@ -735,7 +701,7 @@ mod tests {
                 return Err("expected token".into());
             };
 
-            assert_eq!(Token::Name(input.to_string()), token);
+            assert_eq!(TokenKind::Name, token.kind());
         }
 
         Ok(())
@@ -777,7 +743,8 @@ mod tests {
             let Some(Ok(token)) = scanner.next() else {
                 return Err("expected token".into());
             };
-            assert_eq!(Token::Name(expect.to_string()), token);
+            assert_eq!(TokenKind::Name, token.kind());
+            assert_eq!(expect, token.value());
         }
 
         Ok(())
@@ -799,27 +766,28 @@ myNegativeReal -3.1456
         ";
 
         let expected_tokens = [
-            Token::Name("myStr".to_string()),
-            Token::String("i have a string right here".to_string()),
-            Token::Name("myOtherStr".to_string()),
-            Token::String("and\nanother right here".to_string()),
-            Token::Name("myInt".to_string()),
-            Token::Integer(1234567890),
-            Token::Name("myNegativeInt".to_string()),
-            Token::Integer(-1234567890),
-            Token::Name("myReal".to_string()),
-            Token::Real(3.1456),
-            Token::Name("myNegativeReal".to_string()),
-            Token::Real(-3.1456),
+            (TokenKind::Name, "myStr"),
+            (TokenKind::StringLiteral, "i have a string right here"),
+            (TokenKind::Name, "myOtherStr"),
+            (TokenKind::StringLiteral, "and\nanother right here"),
+            (TokenKind::Name, "myInt"),
+            (TokenKind::Integer, "1234567890"),
+            (TokenKind::Name, "myNegativeInt"),
+            (TokenKind::Integer, "-1234567890"),
+            (TokenKind::Name, "myReal"),
+            (TokenKind::Real, "3.1456"),
+            (TokenKind::Name, "myNegativeReal"),
+            (TokenKind::Real, "-3.1456"),
         ];
 
         let mut scanner = Scanner::from(input.chars());
-        for expect in expected_tokens {
+        for (kind, value) in expected_tokens {
             let Some(Ok(received)) = scanner.next() else {
                 return Err("expected token".into());
             };
 
-            assert_eq!(expect, received);
+            assert_eq!(kind, received.kind());
+            assert_eq!(value, received.value());
         }
 
         Ok(())

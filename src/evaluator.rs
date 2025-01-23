@@ -1,29 +1,15 @@
-use std::collections;
+use crate::{
+    execution::{ExecutionState, Procedure},
+    object::Object,
+    Error, ErrorKind,
+};
 
-use crate::{object::Object, stack::Stack, Error, ErrorKind};
-
-#[allow(dead_code)]
-pub enum Defined {
-    Object(Object),
-    Function(fn(&mut Stack<Object>, &mut Stack<Object>) -> crate::Result<()>),
-}
-
-#[allow(dead_code)]
+#[derive(Default)]
 pub struct Evaluator {
-    operand_stack: Stack<Object>,
-    dict_stack: Stack<collections::HashMap<String, Defined>>,
-    execution_stack: Stack<Object>,
+    execution_state: ExecutionState,
 }
 
 impl Evaluator {
-    pub fn new(dict_stack: Stack<collections::HashMap<String, Defined>>) -> Self {
-        Self {
-            operand_stack: Stack::new(),
-            execution_stack: Stack::new(),
-            dict_stack,
-        }
-    }
-
     pub fn evaluate<I>(&mut self, objects: I) -> crate::Result<()>
     where
         I: Iterator<Item = Object>,
@@ -38,19 +24,21 @@ impl Evaluator {
     fn evaluate_object(&mut self, obj: Object) -> crate::Result<()> {
         match obj {
             Object::Integer(_) | Object::Real(_) | Object::Boolean(_) | Object::LiteralName(_) => {
-                self.operand_stack.push(obj);
+                self.execution_state.operand_stack.push(obj);
                 Ok(())
             }
             Object::Name(ref name) => {
-                match self.dict_stack.search(|dict| dict.contains_key(name)) {
+                match self
+                    .execution_state
+                    .dict_stack
+                    .search(|dict| dict.contains_key(name))
+                {
                     None => Err(Error::from(ErrorKind::Undefined)),
                     Some(dict) => match dict.get(name) {
                         None => Err(Error::from(ErrorKind::Undefined)),
                         Some(defined) => match defined {
-                            Defined::Object(obj) => self.evaluate_object(obj.clone()),
-                            Defined::Function(func) => {
-                                func(&mut self.operand_stack, &mut self.execution_stack)
-                            }
+                            Procedure::Defined(obj) => self.evaluate_object(obj.clone()),
+                            Procedure::System(op) => op(&mut self.execution_state),
                         },
                     },
                 }
