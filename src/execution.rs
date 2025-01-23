@@ -19,6 +19,8 @@ pub struct ExecutionState {
 impl Default for ExecutionState {
     fn default() -> Self {
         let mut system_dict = collections::HashMap::new();
+
+        // Stack operators
         system_dict.insert("dup".to_string(), Procedure::System(operators::dup));
         system_dict.insert("exch".to_string(), Procedure::System(operators::exch));
         system_dict.insert("pop".to_string(), Procedure::System(operators::pop));
