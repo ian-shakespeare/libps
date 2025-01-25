@@ -66,6 +66,24 @@ impl Default for ExecutionState {
         system_dict.insert("srand".to_string(), Procedure::System(operators::srand));
         system_dict.insert("rrand".to_string(), Procedure::System(operators::rrand));
 
+        // Composite operators
+        system_dict.insert("array".to_string(), Procedure::System(operators::array));
+        system_dict.insert("[".to_string(), Procedure::System(operators::startarray));
+        system_dict.insert("]".to_string(), Procedure::System(operators::endarray));
+        system_dict.insert("length".to_string(), Procedure::System(operators::length));
+        system_dict.insert("get".to_string(), Procedure::System(operators::get));
+        system_dict.insert("put".to_string(), Procedure::System(operators::put));
+        system_dict.insert(
+            "getinterval".to_string(),
+            Procedure::System(operators::getinterval),
+        );
+        system_dict.insert(
+            "putinterval".to_string(),
+            Procedure::System(operators::putinterval),
+        );
+        system_dict.insert("astore".to_string(), Procedure::System(operators::astore));
+        system_dict.insert("aload".to_string(), Procedure::System(operators::aload));
+
         let mut dict_stack = Stack::new();
         dict_stack.push(system_dict);
 

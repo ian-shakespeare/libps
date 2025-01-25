@@ -51,6 +51,34 @@ pub fn pop(execution_state: &mut ExecutionState) -> crate::Result<()> {
 /// as shown above. This form of copy operates only on the objects themselves, not
 /// on the values of composite objects.
 ///
+/// In the other forms, copy copies all the elements of the first composite object into
+/// the second. The composite object operands must be of the same type, except that
+/// a packed array can be copied into an array (and only into an array—copy cannot
+/// copy into packed arrays, because they are read-only). This form of copy copies the
+/// value of a composite object. This is quite different from dup and other operators
+/// that copy only the objects themselves (see Section 3.3.1, “Simple and Composite
+/// Objects”). However, copy performs only one level of copying. It does not apply
+/// recursively to elements that are themselves composite objects; instead, the values
+/// of those elements become shared.
+///
+/// In the case of arrays or strings, the length of the second object must be at least as
+/// great as the first; copy returns the initial subarray or substring of the second oper-
+/// and into which the elements were copied. Any remaining elements of array2 or
+/// string2 are unaffected.
+///
+/// In the case of dictionaries, LanguageLevel 1 requires that dict2 have a length (as re-
+/// turned by the length operator) of 0 and a maximum capacity (as returned by the
+/// maxlength operator) at least as great as the length of dict1. LanguageLevels 2 and 3
+/// do not impose this restriction, since dictionaries can expand when necessary.
+///
+/// The literal/executable and access attributes of the result are normally the same as
+/// those of the second operand. However, in LanguageLevel 1 the access attribute of
+/// dict2 is copied from that of dict1.
+///
+/// If the value of the destination object is in global VM and any of the elements cop-
+/// ied from the source object are composite objects whose values are in local VM, an
+/// invalidaccess error occurs (see Section 3.7.2, “Local and Global VM”).
+///
 /// Errors: InvalidAccess, RangeCheck, StackOverflow, StackUnderflow, TypeCheck
 pub fn copy(execution_state: &mut ExecutionState) -> crate::Result<()> {
     let mut original_stack: Stack<Object> = Stack::new();
@@ -78,6 +106,25 @@ pub fn copy(execution_state: &mut ExecutionState) -> crate::Result<()> {
 
             Ok(())
         }
+        Some(Object::Array(destination)) => match execution_state.operand_stack.pop() {
+            Some(Object::Array(source)) => {
+                let mut borrowed_dest = destination.borrow_mut();
+                for (index, obj) in source.borrow().iter().enumerate() {
+                    match borrowed_dest.get_mut(index) {
+                        Some(dest_obj) => *dest_obj = obj.clone(),
+                        None => return Err(Error::from(ErrorKind::RangeCheck)),
+                    }
+                }
+
+                execution_state
+                    .operand_stack
+                    .push(Object::Array(destination.clone()));
+
+                Ok(())
+            }
+            Some(_) => Err(Error::from(ErrorKind::TypeCheck)),
+            None => Err(Error::from(ErrorKind::StackUnderflow)),
+        },
         Some(_) => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
         None => Err(Error::from(ErrorKind::StackUnderflow)),
     }
@@ -271,6 +318,8 @@ pub fn cleartomark(execution_state: &mut ExecutionState) -> crate::Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::{cell, rc};
+
     use super::*;
 
     #[test]
@@ -363,7 +412,35 @@ mod tests {
             execution_state.operand_stack.pop()
         );
 
-        assert!(copy(&mut execution_state).is_err());
+        assert!(copy(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::StackUnderflow));
+
+        let arr1 = rc::Rc::new(cell::RefCell::new(vec![
+            Object::Integer(1),
+            Object::Integer(2),
+            Object::Integer(3),
+        ]));
+        let arr2 = rc::Rc::new(cell::RefCell::new(vec![
+            Object::Integer(4),
+            Object::Integer(5),
+            Object::Integer(6),
+        ]));
+
+        execution_state
+            .operand_stack
+            .push(Object::Array(arr1.clone()));
+        execution_state
+            .operand_stack
+            .push(Object::Array(arr2.clone()));
+
+        assert!(copy(&mut execution_state).is_ok());
+        assert_eq!(1, execution_state.operand_stack.count());
+
+        let arr2 = arr2.borrow();
+        for (i, obj) in arr1.borrow().iter().enumerate() {
+            assert_eq!(obj.clone(), arr2[i]);
+        }
+
+        // TODO: test for errors
     }
 
     #[test]
