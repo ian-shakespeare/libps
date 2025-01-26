@@ -668,9 +668,9 @@ mod tests {
 
         let arr = rc::Rc::new(cell::RefCell::new(vec![Object::Null; 3]));
 
-        execution_state.operand_stack.push(Object::Integer(0));
         execution_state.operand_stack.push(Object::Integer(1));
         execution_state.operand_stack.push(Object::Integer(2));
+        execution_state.operand_stack.push(Object::Integer(3));
         execution_state
             .operand_stack
             .push(Object::Array(arr.clone()));
@@ -679,12 +679,16 @@ mod tests {
         assert_eq!(1, execution_state.operand_stack.count());
 
         let borrowed_arr = arr.borrow();
-        assert_eq!(Object::Integer(0), borrowed_arr[0]);
-        assert_eq!(Object::Integer(1), borrowed_arr[1]);
-        assert_eq!(Object::Integer(2), borrowed_arr[2]);
+        assert_eq!(Object::Integer(1), borrowed_arr[0]);
+        assert_eq!(Object::Integer(2), borrowed_arr[1]);
+        assert_eq!(Object::Integer(3), borrowed_arr[2]);
         drop(borrowed_arr);
 
-        // TODO: test for errors
+        execution_state.operand_stack.push(Object::Integer(1));
+        assert!(astore(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::TypeCheck));
+
+        execution_state.operand_stack.clear();
+        assert!(astore(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::StackUnderflow));
 
         Ok(())
     }
@@ -726,7 +730,10 @@ mod tests {
             execution_state.operand_stack.pop()
         );
 
-        // TODO: test for errors
+        execution_state.operand_stack.push(Object::Integer(1));
+        assert!(aload(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::TypeCheck));
+
+        assert!(aload(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::StackUnderflow));
 
         Ok(())
     }

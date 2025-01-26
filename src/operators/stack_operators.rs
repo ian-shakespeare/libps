@@ -440,7 +440,24 @@ mod tests {
             assert_eq!(obj.clone(), arr2[i]);
         }
 
-        // TODO: test for errors
+        let small_arr = rc::Rc::new(cell::RefCell::new(vec![Object::Integer(1)]));
+        execution_state
+            .operand_stack
+            .push(Object::Array(arr1.clone()));
+        execution_state
+            .operand_stack
+            .push(Object::Array(small_arr.clone()));
+        assert!(copy(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::RangeCheck));
+
+        execution_state.operand_stack.clear();
+        execution_state.operand_stack.push(Object::Integer(1));
+        execution_state
+            .operand_stack
+            .push(Object::Array(arr1.clone()));
+        assert!(copy(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::TypeCheck));
+
+        execution_state.operand_stack.clear();
+        assert!(copy(&mut execution_state).is_err_and(|e| e.kind() == ErrorKind::StackUnderflow));
     }
 
     #[test]
