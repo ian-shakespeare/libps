@@ -15,6 +15,13 @@ impl<T> From<Stack<T>> for Vec<T> {
     }
 }
 
+impl<T> From<Vec<T>> for Stack<T> {
+    fn from(mut value: Vec<T>) -> Self {
+        value.reverse();
+        Self { data: value }
+    }
+}
+
 impl<T> Stack<T> {
     pub fn new() -> Self {
         Self { data: Vec::new() }
