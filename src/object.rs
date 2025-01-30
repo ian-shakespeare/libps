@@ -1,5 +1,7 @@
 use std::{cell, collections, rc};
 
+use crate::{Error, ErrorKind};
+
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer(i32),
@@ -95,3 +97,40 @@ impl PartialEq for Object {
 }
 
 impl Eq for Object {}
+
+impl Object {
+    pub fn is_int(&self) -> bool {
+        match self {
+            Self::Integer(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_real(&self) -> bool {
+        match self {
+            Self::Real(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        match self {
+            Self::String(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn into_int(&self) -> crate::Result<i32> {
+        match self {
+            Self::Integer(i) => Ok(*i),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
+        }
+    }
+
+    pub fn into_real(&self) -> crate::Result<f64> {
+        match self {
+            Self::Real(r) => Ok(*r),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+        }
+    }
+}
