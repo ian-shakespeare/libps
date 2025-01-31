@@ -99,7 +99,7 @@ where
                 break;
             }
 
-            let is_lexing_delim = name.len() == 0
+            let is_lexing_delim = name.is_empty()
                 || name == "<<"
                 || name == ">>"
                 || (name.len() == 1

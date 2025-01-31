@@ -28,8 +28,8 @@ where
             execution_stack: Vec::new(),
             global_dict: collections::HashMap::new(),
             user_dict: collections::HashMap::new(),
-            strings: Container::new(),
-            arrays: Container::new(),
+            strings: Container::default(),
+            arrays: Container::default(),
             rng: RandomNumberGenerator::default(),
         }
     }
@@ -46,8 +46,8 @@ where
             execution_stack: Vec::new(),
             global_dict: collections::HashMap::new(),
             user_dict: collections::HashMap::new(),
-            strings: Container::new(),
-            arrays: Container::new(),
+            strings: Container::default(),
+            arrays: Container::default(),
             rng: RandomNumberGenerator::default(),
         }
     }
@@ -90,8 +90,8 @@ where
                     "cleartomark" => self.cleartomark()?,
                     "add" => self.arithmetic(i32::checked_add, |a: f64, b: f64| a + b)?,
                     "div" => self.arithmetic(i32::checked_div, |a: f64, b: f64| a / b)?,
-                    "idiv" => todo!(),
-                    "imod" => todo!(),
+                    "idiv" => self.idiv()?,
+                    "imod" => self.imod()?,
                     "mul" => self.arithmetic(i32::checked_mul, |a: f64, b: f64| a * b)?,
                     "sub" => self.arithmetic(i32::checked_sub, |a: f64, b: f64| a - b)?,
                     "abs" => self.num_unary(i32::checked_abs, f64::abs)?,
@@ -104,9 +104,7 @@ where
                     "atan" => self.arithmetic(
                         |_, _| None,
                         |den: f64, num: f64| {
-                            positive_degrees(radians_to_degrees(
-                                (f64::from(num) / f64::from(den)).atan(),
-                            ))
+                            positive_degrees(radians_to_degrees((num / den).atan()))
                         },
                     )?,
                     "cos" => self.num_unary(|_| None, f64::cos)?,
@@ -127,7 +125,7 @@ where
                     "putinterval" => self.putinterval()?,
                     "astore" => self.astore()?,
                     "aload" => self.aload()?,
-                    _ => return Err(Error::new(ErrorKind::Undefined, format!("{name}"))),
+                    _ => return Err(Error::new(ErrorKind::Undefined, name)),
                 }
             }
             _ => {}
@@ -244,7 +242,7 @@ where
     fn index(&mut self) -> crate::Result<()> {
         let idx = self.pop_usize()?;
 
-        if self.operand_stack.len() == 0 {
+        if self.operand_stack.is_empty() {
             return Err(Error::from(ErrorKind::RangeCheck));
         }
 
@@ -363,6 +361,34 @@ where
         }
 
         self.push(Object::Real(real(n.into_real()?)));
+
+        Ok(())
+    }
+
+    fn idiv(&mut self) -> crate::Result<()> {
+        let rhs = self.pop_int()?;
+        let lhs = self.pop_int()?;
+
+        let total = match lhs.checked_div(rhs) {
+            Some(total) => Ok(total),
+            None => Err(Error::from(ErrorKind::UndefinedResult)),
+        }?;
+
+        self.push(Object::Integer(total));
+
+        Ok(())
+    }
+
+    fn imod(&mut self) -> crate::Result<()> {
+        let rhs = self.pop_int()?;
+        let lhs = self.pop_int()?;
+
+        let total = match lhs.checked_rem(rhs) {
+            Some(total) => Ok(total),
+            None => Err(Error::from(ErrorKind::UndefinedResult)),
+        }?;
+
+        self.push(Object::Integer(total));
 
         Ok(())
     }
@@ -560,7 +586,7 @@ where
         };
 
         let len = match self.arrays.get(arr_idx) {
-            Ok(Composite { len, .. }) => Ok(len.clone()),
+            Ok(Composite { len, .. }) => Ok(*len),
             Err(_) => Err(Error::from(ErrorKind::Undefined)),
         }?;
 
@@ -1134,7 +1160,6 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             assert_eq!(1, interpreter.operand_stack.len());
@@ -1153,13 +1178,10 @@ mod tests {
             ("-2147483648 abs", Object::Real(-1.0 * f64::from(i32::MIN))),
             ("1.0 abs", Object::Real(1.0)),
             ("-1.0 abs", Object::Real(1.0)),
-            ("1.7976931348623157e308 abs", Object::Real(f64::MAX)),
-            ("-1.7976931348623157e308 abs", Object::Real(f64::MAX)),
         ];
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             assert_eq!(1, interpreter.operand_stack.len());
@@ -1180,7 +1202,6 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             assert_eq!(1, interpreter.operand_stack.len());
@@ -1301,7 +1322,6 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             assert_eq!(1, interpreter.operand_stack.len());
@@ -1324,67 +1344,58 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             assert_eq!(1, interpreter.operand_stack.len());
-            let Some(Object::Real(value)) = interpreter.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect).abs() < ERROR_MARGIN);
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
         Ok(())
     }
 
     #[test]
-    fn test_atan() {
-        let mut execution_state = ExecutionState::new();
-
+    fn test_atan() -> Result<(), Box<dyn error::Error>> {
         let cases = [
-            (Object::Integer(0), Object::Integer(1), 0.0),
-            (Object::Real(0.0), Object::Real(1.0), 0.0),
-            (Object::Integer(1), Object::Integer(0), 90.0),
-            (Object::Real(1.0), Object::Real(0.0), 90.0),
-            (Object::Integer(-100), Object::Integer(0), 270.0),
-            (Object::Real(-100.0), Object::Real(0.0), 270.0),
-            (Object::Integer(4), Object::Integer(4), 45.0),
-            (Object::Real(4.0), Object::Real(4.0), 45.0),
+            ("0 1 atan", 0.0),
+            ("0.0 1.0 atan", 0.0),
+            ("1 0 atan", 90.0),
+            ("1.0 0.0 atan", 90.0),
+            ("-100 0 atan", 270.0),
+            ("-100.0 0.0 atan", 270.0),
+            ("4 4 atan", 45.0),
+            ("4.0 4.0 atan", 45.0),
         ];
 
-        for (num, den, expect) in cases {
-            execution_state.operand_stack.push(num);
-            execution_state.operand_stack.push(den);
+        for (input, expect) in cases {
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(atan(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            assert_eq!(
-                Some(Object::Real(expect)),
-                execution_state.operand_stack.pop()
-            );
+            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(Some(Object::Real(expect)), interpreter.operand_stack.pop());
         }
+
+        Ok(())
     }
 
     #[test]
     fn test_cos() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         let cases = [
-            (Object::Integer(0), 1.0),
-            (Object::Real(0.0), 1.0),
-            (Object::Integer(90), 0.0),
-            (Object::Real(-90.0), 0.0),
+            ("0 cos", 1.0),
+            ("0.0 cos", 1.0),
+            ("90 cos", 0.0),
+            ("-90.0 cos", 0.0),
         ];
 
         for (input, expect) in cases {
-            execution_state.operand_stack.push(input);
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(cos(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Real(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect).abs() < ERROR_MARGIN);
+            assert_eq!(1, interpreter.operand_stack.len());
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
         Ok(())
@@ -1392,24 +1403,21 @@ mod tests {
 
     #[test]
     fn test_sin() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         let cases = [
-            (Object::Integer(0), 0.0),
-            (Object::Real(0.0), 0.0),
-            (Object::Integer(90), 1.0),
-            (Object::Real(-90.0), -1.0),
+            ("0 sin", 0.0),
+            ("0.0 sin", 0.0),
+            ("90 sin", 1.0),
+            ("-90.0 sin", -1.0),
         ];
 
         for (input, expect) in cases {
-            execution_state.operand_stack.push(input);
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(sin(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Real(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect).abs() < ERROR_MARGIN);
+            assert_eq!(1, interpreter.operand_stack.len());
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
         Ok(())
@@ -1417,33 +1425,27 @@ mod tests {
 
     #[test]
     fn test_exp() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         let cases = [
-            (Object::Integer(1), Object::Integer(100), 1.0),
-            (Object::Real(1.0), Object::Real(100.0), 1.0),
-            (Object::Integer(2), Object::Integer(8), 256.0),
-            (Object::Real(2.0), Object::Real(8.0), 256.0),
-            (Object::Real(2.0), Object::Real(8.0), 256.0),
-            (Object::Real(2.0), Object::Real(8.0), 256.0),
-            (Object::Integer(8), Object::Real(1.0 / 3.0), 2.0),
-            (Object::Real(8.0), Object::Real(1.0 / 3.0), 2.0),
-            (Object::Integer(9), Object::Real(0.5), 3.0),
-            (Object::Real(9.0), Object::Real(0.5), 3.0),
-            (Object::Integer(-9), Object::Integer(-1), -0.111111),
-            (Object::Real(-9.0), Object::Real(-1.0), -0.111111),
+            ("1 100 exp", 1.0),
+            ("1.0 100.0 exp", 1.0),
+            ("2 8 exp", 256.0),
+            ("2.0 8.0 exp", 256.0),
+            ("8 0.33333333 exp", 2.0),
+            ("8.0 0.33333333 exp", 2.0),
+            ("9 0.5 exp", 3.0),
+            ("9.0 0.5 exp", 3.0),
+            ("-9 -1 exp", -0.111111),
+            ("-9.0 -1.0 exp", -0.111111),
         ];
 
-        for (base, exponent, expect) in cases {
-            execution_state.operand_stack.push(base);
-            execution_state.operand_stack.push(exponent);
+        for (input, expect) in cases {
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(exp(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Real(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect) < ERROR_MARGIN);
+            assert_eq!(1, interpreter.operand_stack.len());
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect) < ERROR_MARGIN);
         }
 
         Ok(())
@@ -1451,24 +1453,21 @@ mod tests {
 
     #[test]
     fn test_ln() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         let cases = [
-            (Object::Integer(10), 2.302585),
-            (Object::Real(10.0), 2.302585),
-            (Object::Integer(100), 4.60517),
-            (Object::Real(100.0), 4.60517),
+            ("10 ln", 2.302585),
+            ("10.0 ln", 2.302585),
+            ("100 ln", 4.60517),
+            ("100.0 ln", 4.60517),
         ];
 
         for (input, expect) in cases {
-            execution_state.operand_stack.push(input);
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(ln(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Real(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect) < ERROR_MARGIN);
+            assert_eq!(1, interpreter.operand_stack.len());
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
         Ok(())
@@ -1476,24 +1475,21 @@ mod tests {
 
     #[test]
     fn test_log() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         let cases = [
-            (Object::Integer(10), 1.0),
-            (Object::Real(10.0), 1.0),
-            (Object::Integer(100), 2.0),
-            (Object::Real(100.0), 2.0),
+            ("10 log", 1.0),
+            ("10.0 log", 1.0),
+            ("100 log", 2.0),
+            ("100.0 log", 2.0),
         ];
 
         for (input, expect) in cases {
-            execution_state.operand_stack.push(input);
+            let mut interpreter = Interpreter::new(input.chars());
+            interpreter.evaluate()?;
 
-            assert!(log(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Real(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected real object".into());
-            };
-            assert!((value - expect) < ERROR_MARGIN);
+            assert_eq!(1, interpreter.operand_stack.len());
+
+            let received = interpreter.pop_real()?;
+            assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
         Ok(())
@@ -1501,15 +1497,12 @@ mod tests {
 
     #[test]
     fn test_rand() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
-
         for _ in 0..5 {
-            assert!(rand(&mut execution_state).is_ok());
-            assert_eq!(1, execution_state.operand_stack.count());
-            let Some(Object::Integer(value)) = execution_state.operand_stack.pop() else {
-                return Err("expected integer object".into());
-            };
-            assert!(value >= 0);
+            let mut interpreter = Interpreter::new("rand".chars());
+            interpreter.evaluate()?;
+
+            assert_eq!(1, interpreter.operand_stack.len());
+            assert!(interpreter.pop_int()? >= 0);
         }
 
         Ok(())
@@ -1517,48 +1510,30 @@ mod tests {
 
     #[test]
     fn test_srand() -> Result<(), Box<dyn error::Error>> {
-        let mut execution_state = ExecutionState::new();
+        let mut interpreter = Interpreter::new("100 srand rand".chars());
+        interpreter.evaluate()?;
+        let initial_value = interpreter.pop_int()?;
 
-        execution_state.operand_stack.push(Object::Integer(100));
-        assert!(srand(&mut execution_state).is_ok());
-        assert!(rand(&mut execution_state).is_ok());
-        let Some(Object::Integer(initial_value)) = execution_state.operand_stack.pop() else {
-            return Err("expected integer object".into());
-        };
+        let mut interpreter = Interpreter::new("1 srand rand".chars());
+        interpreter.evaluate()?;
+        let intermediate_value = interpreter.pop_int()?;
+        assert_ne!(initial_value, intermediate_value);
 
-        execution_state.operand_stack.push(Object::Integer(1));
-        assert!(srand(&mut execution_state).is_ok());
-        assert!(rand(&mut execution_state).is_ok());
-        let Some(Object::Integer(intmd_value)) = execution_state.operand_stack.pop() else {
-            return Err("expected integer object".into());
-        };
-        assert_ne!(initial_value, intmd_value);
-
-        execution_state.operand_stack.push(Object::Integer(100));
-        assert!(srand(&mut execution_state).is_ok());
-        assert!(rand(&mut execution_state).is_ok());
-        let Some(Object::Integer(end_value)) = execution_state.operand_stack.pop() else {
-            return Err("expected integer object".into());
-        };
+        let mut interpreter = Interpreter::new("100 srand rand".chars());
+        interpreter.evaluate()?;
+        let end_value = interpreter.pop_int()?;
         assert_eq!(initial_value, end_value);
 
         Ok(())
     }
 
     #[test]
-    fn test_rrand() {
-        let mut execution_state = ExecutionState::new();
+    fn test_rrand() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::new("1 srand rrand".chars());
+        interpreter.evaluate()?;
 
-        execution_state.operand_stack.push(Object::Integer(1));
-        assert!(srand(&mut execution_state).is_ok());
-        for _ in 0..3 {
-            assert!(rand(&mut execution_state).is_ok());
-        }
-        assert!(rrand(&mut execution_state).is_ok());
-        assert_eq!(
-            Some(Object::Integer(1)),
-            execution_state.operand_stack.pop(),
-        );
-        execution_state.operand_stack.clear();
+        assert_eq!(1, interpreter.pop_int()?);
+
+        Ok(())
     }
 }

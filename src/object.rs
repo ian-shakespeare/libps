@@ -101,24 +101,15 @@ impl Eq for Object {}
 
 impl Object {
     pub fn is_int(&self) -> bool {
-        match self {
-            Self::Integer(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::Integer(_))
     }
 
     pub fn is_real(&self) -> bool {
-        match self {
-            Self::Real(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::Real(_))
     }
 
     pub fn is_string(&self) -> bool {
-        match self {
-            Self::String(_) => true,
-            _ => false,
-        }
+        matches!(self, Self::String(_))
     }
 
     pub fn into_int(&self) -> crate::Result<i32> {
@@ -142,14 +133,16 @@ pub struct Container<V> {
     counter: usize,
 }
 
-impl<V> Container<V> {
-    pub fn new() -> Self {
+impl<V> Default for Container<V> {
+    fn default() -> Self {
         Self {
             inner: collections::HashMap::new(),
             counter: 0,
         }
     }
+}
 
+impl<V> Container<V> {
     pub fn insert(&mut self, v: V) -> usize {
         self.counter += 1;
 

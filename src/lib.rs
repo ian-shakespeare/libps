@@ -1,4 +1,5 @@
 pub use error::{Error, ErrorKind};
+pub use interpreter::Interpreter;
 pub use lexer::Lexer;
 pub use object::Object;
 
@@ -9,16 +10,12 @@ mod lexer;
 mod object;
 mod rand;
 mod stack;
-mod token;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
 pub fn eval(input: &str) -> crate::Result<()> {
-    /*
-    let scanner = Scanner::from(input.chars());
-    let mut evaluator = Evaluator::default();
-    evaluator.evaluate(scanner.filter_map(|o| o.ok()))?;
-    */
+    let mut interpreter = Interpreter::new(input.chars());
+    interpreter.evaluate()?;
 
     Ok(())
 }
