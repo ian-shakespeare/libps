@@ -2,7 +2,7 @@ use std::iter;
 
 use crate::{
     encoding::{decode_ascii85, decode_hex},
-    object::Object,
+    object::{Access, Composite, Container, Object},
     Error, ErrorKind,
 };
 
@@ -24,13 +24,14 @@ where
     }
 }
 
-impl<I> Iterator for Lexer<I>
+impl<I> Lexer<I>
 where
     I: Iterator<Item = char>,
 {
-    type Item = crate::Result<Object>;
-
-    fn next(&mut self) -> Option<Self::Item> {
+    pub fn next_obj(
+        &mut self,
+        string_container: &mut Container<Composite<String>>,
+    ) -> Option<crate::Result<Object>> {
         loop {
             if self.next_is_whitespace() {
                 self.input.next()?;
@@ -48,8 +49,8 @@ where
                 '-' | '.' | '0'..='9' => {
                     return Some(self.lex_numeric());
                 }
-                '(' => return Some(self.lex_string_literal()),
-                '<' => return Some(self.lex_gt()),
+                '(' => return Some(self.lex_string_literal(string_container)),
+                '<' => return Some(self.lex_gt(string_container)),
                 _ => {
                     let name = String::from(self.input.next()?);
                     return Some(self.lex_name(name));
@@ -57,12 +58,7 @@ where
             };
         }
     }
-}
 
-impl<I> Lexer<I>
-where
-    I: Iterator<Item = char>,
-{
     fn lex_comment(&mut self) -> crate::Result<()> {
         self.expect_char('%')?;
 
@@ -79,7 +75,10 @@ where
         Ok(())
     }
 
-    fn lex_gt(&mut self) -> crate::Result<Object> {
+    fn lex_gt(
+        &mut self,
+        string_container: &mut Container<Composite<String>>,
+    ) -> crate::Result<Object> {
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
@@ -88,24 +87,24 @@ where
 
         match ch {
             '<' => Ok(Object::Name("<<".to_string())),
-            '~' => self.lex_string_base85(),
-            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(),
+            '~' => self.lex_string_base85(string_container),
+            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(string_container),
             _ => self.lex_name("<".to_string()),
         }
     }
 
-    fn lex_name(&mut self, mut word: String) -> crate::Result<Object> {
+    fn lex_name(&mut self, mut name: String) -> crate::Result<Object> {
         loop {
             if self.next_is_whitespace() {
                 break;
             }
 
-            let is_lexing_delim = word.len() == 0
-                || word == "<<"
-                || word == ">>"
-                || (word.len() == 1
+            let is_lexing_delim = name.len() == 0
+                || name == "<<"
+                || name == ">>"
+                || (name.len() == 1
                     && is_delimiter(
-                        word.chars()
+                        name.chars()
                             .nth(0)
                             .expect("failed to get first character of non-empty name"),
                     ));
@@ -118,12 +117,16 @@ where
             }
 
             match self.input.next() {
-                Some(ch) => word.push(ch),
+                Some(ch) => name.push(ch),
                 None => break,
             }
         }
 
-        Ok(Object::Name(word))
+        Ok(match name.as_str() {
+            "true" => Object::Boolean(true),
+            "false" => Object::Boolean(true),
+            _ => Object::Name(name),
+        })
     }
 
     fn lex_numeric(&mut self) -> crate::Result<Object> {
@@ -188,7 +191,10 @@ where
         }
     }
 
-    fn lex_string_base85(&mut self) -> crate::Result<Object> {
+    fn lex_string_base85(
+        &mut self,
+        container: &mut Container<Composite<String>>,
+    ) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -205,12 +211,23 @@ where
             }
         }
 
-        let decoded = decode_ascii85(&string)?;
+        let inner = decode_ascii85(&string)?;
+        let len = inner.len();
+        let composite = Composite {
+            access: Access::default(),
+            inner,
+            len,
+        };
 
-        Ok(Object::String(decoded))
+        let idx = container.insert(composite);
+
+        Ok(Object::String(idx))
     }
 
-    fn lex_string_hex(&mut self) -> crate::Result<Object> {
+    fn lex_string_hex(
+        &mut self,
+        container: &mut Container<Composite<String>>,
+    ) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -230,15 +247,26 @@ where
             }
         }
 
-        let decoded = decode_hex(&string)?;
+        let inner = decode_hex(&string)?;
+        let len = inner.len();
+        let composite = Composite {
+            access: Access::default(),
+            inner,
+            len,
+        };
 
-        Ok(Object::String(decoded))
+        let idx = container.insert(composite);
+
+        Ok(Object::String(idx))
     }
 
-    fn lex_string_literal(&mut self) -> crate::Result<Object> {
+    fn lex_string_literal(
+        &mut self,
+        container: &mut Container<Composite<String>>,
+    ) -> crate::Result<Object> {
         self.expect_char('(')?;
 
-        let mut word = String::new();
+        let mut string = String::new();
         let mut active_parenthesis = 0;
 
         loop {
@@ -248,14 +276,14 @@ where
 
             match ch {
                 '(' => {
-                    word.push(ch);
+                    string.push(ch);
                     active_parenthesis += 1;
                 }
                 ')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
-                    word.push(ch);
+                    string.push(ch);
                     active_parenthesis -= 1;
                 }
                 '\\' => {
@@ -265,14 +293,14 @@ where
                     }?;
                     match next_ch {
                         '\n' => continue,
-                        'r' => word.push('\r'),
-                        'n' => word.push('\n'),
-                        't' => word.push('\t'),
-                        'b' => word.push(BACKSPACE),
-                        'f' => word.push(FORM_FEED),
-                        '\\' => word.push('\\'),
-                        '(' => word.push('('),
-                        ')' => word.push(')'),
+                        'r' => string.push('\r'),
+                        'n' => string.push('\n'),
+                        't' => string.push('\t'),
+                        'b' => string.push(BACKSPACE),
+                        'f' => string.push(FORM_FEED),
+                        '\\' => string.push('\\'),
+                        '(' => string.push('('),
+                        ')' => string.push(')'),
                         '\r' => match self.input.peek() {
                             None => {
                                 return Err(Error::new(ErrorKind::Syntax, "unterminated string"))
@@ -291,7 +319,7 @@ where
                                     match u8::from_str_radix(&octal, 8) {
                                         Err(_) => return Err(Error::from(ErrorKind::Syntax)),
                                         Ok(value) => {
-                                            word.push(value.into());
+                                            string.push(value.into());
                                             let _ = self.input.next();
                                             let _ = self.input.next();
                                         }
@@ -300,14 +328,23 @@ where
                                 _ => return Err(Error::from(ErrorKind::Syntax)),
                             }
                         }
-                        _ => word.push(next_ch),
+                        _ => string.push(next_ch),
                     }
                 }
-                _ => word.push(ch),
+                _ => string.push(ch),
             }
         }
 
-        Ok(Object::String(word))
+        let len = string.len();
+        let composite = Composite {
+            access: Access::default(),
+            inner: string,
+            len,
+        };
+
+        let idx = container.insert(composite);
+
+        Ok(Object::String(idx))
     }
 
     fn expect_char(&mut self, ch: char) -> crate::Result<()> {

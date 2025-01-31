@@ -4,11 +4,9 @@ pub use object::Object;
 
 mod encoding;
 mod error;
-mod execution;
 mod interpreter;
 mod lexer;
 mod object;
-mod operators;
 mod rand;
 mod stack;
 mod token;

@@ -1,19 +1,44 @@
-use std::{cell, collections, rc};
+use std::collections;
 
 use crate::{Error, ErrorKind};
+
+#[derive(Default)]
+pub enum Access {
+    #[default]
+    Unlimited,
+    ReadOnly,
+    ExecuteOnly,
+    None,
+}
+
+pub struct Composite<T> {
+    pub inner: T,
+    pub access: Access,
+    pub len: usize,
+}
+
+impl<T> Composite<T> {
+    pub fn is_read_only(&self) -> bool {
+        matches!(self.access, Access::ReadOnly)
+    }
+
+    pub fn is_exec_only(&self) -> bool {
+        matches!(self.access, Access::ExecuteOnly)
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer(i32),
     Real(f64),
     Boolean(bool),
-    Array(rc::Rc<cell::RefCell<Vec<Object>>>),
-    PackedArray(rc::Rc<cell::RefCell<Vec<Object>>>),
-    String(String),
-    LiteralName(String),
+    Array(usize),
+    PackedArray(usize),
+    String(usize),
+    Dictionary(usize),
+    Literal(String),
     Name(String),
-    Dictionary(rc::Rc<collections::HashMap<String, Object>>),
-    // File(Box<fs::File>),
+    File,
     Mark,
     Null,
     Save,
@@ -27,31 +52,7 @@ impl From<Object> for String {
             Object::Integer(value) => value.to_string(),
             Object::Real(value) => value.to_string(),
             Object::Boolean(value) => value.to_string(),
-            Object::String(value) | Object::Name(value) => value,
-            Object::Array(values) => {
-                let mut output = String::from('[');
-                for obj in values.borrow().iter() {
-                    output.push_str(&format!(" {}", &String::from(obj.clone())))
-                }
-                output.push_str(" ]");
-                output
-            }
-            Object::PackedArray(values) => {
-                let mut output = String::from('{');
-                for obj in values.borrow().iter() {
-                    output.push_str(&format!(" {}", &String::from(obj.clone())))
-                }
-                output.push_str(" }");
-                output
-            }
-            Object::Dictionary(values) => {
-                let mut output = String::from("<<");
-                for (key, value) in values.iter() {
-                    output.push_str(&format!(" {} {}", &key, &String::from(value.clone())));
-                }
-                output.push_str(" >>");
-                output
-            }
+            Object::Name(value) => value,
             _ => "".to_string(),
         }
     }
@@ -75,11 +76,11 @@ impl PartialEq for Object {
                 _ => false,
             },
             Self::Array(value) => match other {
-                Self::Array(other_value) => value.as_ptr() == other_value.as_ptr(),
+                Self::Array(other_value) => value == other_value,
                 _ => false,
             },
             Self::PackedArray(value) => match other {
-                Self::PackedArray(other_value) => value.as_ptr() == other_value.as_ptr(),
+                Self::PackedArray(other_value) => value == other_value,
                 _ => false,
             },
             Self::String(value) => match other {
@@ -129,8 +130,45 @@ impl Object {
 
     pub fn into_real(&self) -> crate::Result<f64> {
         match self {
+            Self::Integer(i) => Ok(f64::from(*i)),
             Self::Real(r) => Ok(*r),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+        }
+    }
+}
+
+pub struct Container<V> {
+    inner: collections::HashMap<usize, V>,
+    counter: usize,
+}
+
+impl<V> Container<V> {
+    pub fn new() -> Self {
+        Self {
+            inner: collections::HashMap::new(),
+            counter: 0,
+        }
+    }
+
+    pub fn insert(&mut self, v: V) -> usize {
+        self.counter += 1;
+
+        let _ = self.inner.insert(self.counter, v);
+
+        self.counter
+    }
+
+    pub fn get(&mut self, k: usize) -> crate::Result<&V> {
+        match self.inner.get(&k) {
+            Some(v) => Ok(v),
+            None => Err(Error::from(ErrorKind::Undefined)), // TODO: VmError
+        }
+    }
+
+    pub fn get_mut(&mut self, k: usize) -> crate::Result<&mut V> {
+        match self.inner.get_mut(&k) {
+            Some(v) => Ok(v),
+            None => Err(Error::from(ErrorKind::Undefined)), // TODO: VmError
         }
     }
 }
