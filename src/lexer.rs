@@ -352,15 +352,15 @@ where
     }
 
     fn next_is_delimiter(&mut self) -> bool {
-        self.input.peek().map_or(false, |ch| is_delimiter(*ch))
+        self.input.peek().is_some_and(|ch| is_delimiter(*ch))
     }
 
     fn next_is_whitespace(&mut self) -> bool {
-        self.input.peek().map_or(false, |ch| is_whitespace(*ch))
+        self.input.peek().is_some_and(|ch| is_whitespace(*ch))
     }
 
     fn next_is_regular(&mut self) -> bool {
-        self.input.peek().map_or(false, |ch| is_regular(*ch))
+        self.input.peek().is_some_and(|ch| is_regular(*ch))
     }
 }
 
