@@ -3,7 +3,7 @@ name: Format
 on: [push]
 
 jobs:
-  lint:
+  format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
