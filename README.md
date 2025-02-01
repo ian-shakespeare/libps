@@ -16,10 +16,10 @@ We actively encourage contributions! Read our [contribution guide](https://githu
 
 ## License
 
-Unless otherwise noted, the libPS source files are distributed under the [BSD 3-Clause license](https://github.com/ian-shakespeare/libps/blob/main/LICENSE.md) found in the LICENSE file.
+Unless otherwise noted, the libPS source files are distributed under the [BSD-3-Clause license](https://github.com/ian-shakespeare/libps/blob/main/LICENSE.md) found in the LICENSE file.
 
 ## Contributions
 
 Unless you explicitly state otherwise, any contribution intentionally submitted
-for inclusion in libPS by you, shall be licensed as BSD 3-Clause, without any additional
+for inclusion in libPS by you, shall be licensed as BSD-3-Clause, without any additional
 terms or conditions.
