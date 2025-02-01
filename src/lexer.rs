@@ -99,15 +99,17 @@ where
                 break;
             }
 
-            let is_lexing_delim = name.is_empty()
-                || name == "<<"
-                || name == ">>"
-                || (name.len() == 1
-                    && is_delimiter(
-                        name.chars()
-                            .nth(0)
-                            .expect("failed to get first character of non-empty name"),
-                    ));
+            let is_lexing_literal = name == "/";
+            let is_lexing_dict = name == "<<" || name == ">>";
+            let has_delim_start = name.len() == 1
+                && is_delimiter(
+                    name.chars()
+                        .nth(0)
+                        .expect("failed to get first character of non-empty name"),
+                );
+
+            let is_lexing_delim =
+                !is_lexing_literal && (name.is_empty() || is_lexing_dict || has_delim_start);
 
             let should_deliminate = (!is_lexing_delim && self.next_is_delimiter())
                 || (is_lexing_delim && !self.next_is_delimiter());
@@ -125,7 +127,8 @@ where
         Ok(match name.as_str() {
             "true" => Object::Boolean(true),
             "false" => Object::Boolean(true),
-            _ => Object::Name(name),
+            name if name.starts_with('/') => Object::Literal(name.to_string()),
+            name => Object::Name(name.to_string()),
         })
     }
 
@@ -379,7 +382,7 @@ where
 }
 
 fn is_delimiter(ch: char) -> bool {
-    matches!(ch, '<' | '>' | '[' | ']' | '{' | '}' | '%')
+    matches!(ch, '<' | '>' | '[' | ']' | '{' | '}' | '/' | '%')
 }
 
 fn is_whitespace(ch: char) -> bool {
@@ -692,30 +695,34 @@ mod tests {
     #[test]
     fn test_lex_self_deliminating() -> Result<(), Box<dyn error::Error>> {
         let inputs = [
-            ("mid[dle", "["),
-            ("mid]dle", "]"),
-            ("mid{dle", "{"),
-            ("mid}dle", "}"),
-            ("mid<<dle", "<<"),
-            ("mid>>dle", ">>"),
-            ("1[2", "["),
-            ("1]2", "]"),
-            ("1{2", "{"),
-            ("1}2", "}"),
-            ("1<<2", "<<"),
-            ("1>>2", ">>"),
-            ("1.2[3", "["),
-            ("1.2]3", "]"),
-            ("1.2{3", "{"),
-            ("1.2}3", "}"),
-            ("1.2<<3", "<<"),
-            ("1.2>>3", ">>"),
-            ("16#FF[FF", "["),
-            ("16#FF]FF", "]"),
-            ("16#FF{FF", "{"),
-            ("16#FF}FF", "}"),
-            ("16#FF<<FF", "<<"),
-            ("16#FF>>FF", ">>"),
+            ("mid[dle", Object::Name("[".to_string())),
+            ("mid]dle", Object::Name("]".to_string())),
+            ("mid{dle", Object::Name("{".to_string())),
+            ("mid}dle", Object::Name("}".to_string())),
+            ("mid<<dle", Object::Name("<<".to_string())),
+            ("mid>>dle", Object::Name(">>".to_string())),
+            ("mid/dle", Object::Literal("/dle".to_string())),
+            ("1[2", Object::Name("[".to_string())),
+            ("1]2", Object::Name("]".to_string())),
+            ("1{2", Object::Name("{".to_string())),
+            ("1}2", Object::Name("}".to_string())),
+            ("1<<2", Object::Name("<<".to_string())),
+            ("1>>2", Object::Name(">>".to_string())),
+            ("1/2", Object::Literal("/2".to_string())),
+            ("1.2[3", Object::Name("[".to_string())),
+            ("1.2]3", Object::Name("]".to_string())),
+            ("1.2{3", Object::Name("{".to_string())),
+            ("1.2}3", Object::Name("}".to_string())),
+            ("1.2<<3", Object::Name("<<".to_string())),
+            ("1.2>>3", Object::Name(">>".to_string())),
+            ("1.2/3", Object::Literal("/3".to_string())),
+            ("16#FF[FF", Object::Name("[".to_string())),
+            ("16#FF]FF", Object::Name("]".to_string())),
+            ("16#FF{FF", Object::Name("{".to_string())),
+            ("16#FF}FF", Object::Name("}".to_string())),
+            ("16#FF<<FF", Object::Name("<<".to_string())),
+            ("16#FF>>FF", Object::Name(">>".to_string())),
+            ("16#FF/FF", Object::Literal("/FF".to_string())),
         ];
 
         for (input, expect) in inputs {
@@ -723,9 +730,9 @@ mod tests {
             let mut container = Container::default();
             let _ = lexer.next_obj(&mut container);
 
-            let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+            let obj = lexer.next_obj(&mut container).ok_or("expected object")??;
 
-            assert_eq!(Object::Name(expect.to_string()), name);
+            assert_eq!(expect, obj);
         }
 
         Ok(())

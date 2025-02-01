@@ -99,6 +99,10 @@ impl PartialEq for Object {
                 Self::String(other_value) => value == other_value,
                 _ => false,
             },
+            Self::Literal(value) => match other {
+                Self::Literal(other_value) => value == other_value,
+                _ => false,
+            },
             Self::Name(value) => match other {
                 Self::Name(other_value) => value == other_value,
                 _ => false,
