@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, process};
 
 use libps::eval;
 
@@ -10,6 +10,7 @@ fn main() {
     }
 
     if let Err(e) = eval(&buf) {
-        println!("{}", e);
+        eprintln!("{}", e);
+        process::exit(1);
     }
 }
