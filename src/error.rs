@@ -13,6 +13,7 @@ pub enum ErrorKind {
     UndefinedResult,
     UnmatchedMark,
     Unregistered,
+    VmError,
 }
 
 impl From<ErrorKind> for &'static str {
@@ -29,6 +30,7 @@ impl From<ErrorKind> for &'static str {
             ErrorKind::UndefinedResult => "undefinedresult",
             ErrorKind::UnmatchedMark => "unmatchedmark",
             ErrorKind::Unregistered => "unregistered",
+            ErrorKind::VmError => "vmerror",
         }
     }
 }

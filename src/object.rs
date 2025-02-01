@@ -154,14 +154,14 @@ impl<V> Container<V> {
     pub fn get(&mut self, k: usize) -> crate::Result<&V> {
         match self.inner.get(&k) {
             Some(v) => Ok(v),
-            None => Err(Error::from(ErrorKind::Undefined)), // TODO: VmError
+            None => Err(Error::from(ErrorKind::VmError)),
         }
     }
 
     pub fn get_mut(&mut self, k: usize) -> crate::Result<&mut V> {
         match self.inner.get_mut(&k) {
             Some(v) => Ok(v),
-            None => Err(Error::from(ErrorKind::Undefined)), // TODO: VmError
+            None => Err(Error::from(ErrorKind::VmError)),
         }
     }
 }

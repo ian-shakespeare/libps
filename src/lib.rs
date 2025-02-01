@@ -9,7 +9,6 @@ mod interpreter;
 mod lexer;
 mod object;
 mod rand;
-mod stack;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 

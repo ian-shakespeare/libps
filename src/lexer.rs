@@ -30,7 +30,7 @@ where
 {
     pub fn next_obj(
         &mut self,
-        string_container: &mut Container<Composite<String>>,
+        strings: &mut Container<Composite<String>>,
     ) -> Option<crate::Result<Object>> {
         loop {
             if self.next_is_whitespace() {
@@ -49,8 +49,8 @@ where
                 '-' | '.' | '0'..='9' => {
                     return Some(self.lex_numeric());
                 }
-                '(' => return Some(self.lex_string_literal(string_container)),
-                '<' => return Some(self.lex_gt(string_container)),
+                '(' => return Some(self.lex_string_literal(strings)),
+                '<' => return Some(self.lex_gt(strings)),
                 _ => {
                     let name = String::from(self.input.next()?);
                     return Some(self.lex_name(name));
@@ -75,10 +75,7 @@ where
         Ok(())
     }
 
-    fn lex_gt(
-        &mut self,
-        string_container: &mut Container<Composite<String>>,
-    ) -> crate::Result<Object> {
+    fn lex_gt(&mut self, strings: &mut Container<Composite<String>>) -> crate::Result<Object> {
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
@@ -87,8 +84,8 @@ where
 
         match ch {
             '<' => Ok(Object::Name("<<".to_string())),
-            '~' => self.lex_string_base85(string_container),
-            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(string_container),
+            '~' => self.lex_string_base85(strings),
+            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(strings),
             _ => self.lex_name("<".to_string()),
         }
     }
@@ -193,7 +190,7 @@ where
 
     fn lex_string_base85(
         &mut self,
-        container: &mut Container<Composite<String>>,
+        strings: &mut Container<Composite<String>>,
     ) -> crate::Result<Object> {
         let mut string = String::new();
 
@@ -219,14 +216,14 @@ where
             len,
         };
 
-        let idx = container.insert(composite);
+        let idx = strings.insert(composite);
 
         Ok(Object::String(idx))
     }
 
     fn lex_string_hex(
         &mut self,
-        container: &mut Container<Composite<String>>,
+        strings: &mut Container<Composite<String>>,
     ) -> crate::Result<Object> {
         let mut string = String::new();
 
@@ -255,14 +252,14 @@ where
             len,
         };
 
-        let idx = container.insert(composite);
+        let idx = strings.insert(composite);
 
         Ok(Object::String(idx))
     }
 
     fn lex_string_literal(
         &mut self,
-        container: &mut Container<Composite<String>>,
+        strings: &mut Container<Composite<String>>,
     ) -> crate::Result<Object> {
         self.expect_char('(')?;
 
@@ -342,7 +339,7 @@ where
             len,
         };
 
-        let idx = container.insert(composite);
+        let idx = strings.insert(composite);
 
         Ok(Object::String(idx))
     }
@@ -377,4 +374,409 @@ fn is_whitespace(ch: char) -> bool {
 
 fn is_regular(ch: char) -> bool {
     !is_delimiter(ch) && !is_whitespace(ch)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::error;
+
+    #[test]
+    fn test_lex_comment() -> Result<(), Box<dyn error::Error>> {
+        let mut lexer = Lexer::from("% this is a comment".chars());
+        let mut container = Container::default();
+        let obj = lexer.next_obj(&mut container);
+
+        assert!(obj.is_none());
+
+        let cases = [
+            ("10% this is a comment", Object::Integer(10)),
+            ("16#FFFE% this is a comment", Object::Integer(0xFFFE)),
+            ("1.0% this is a comment", Object::Real(1.0)),
+            ("1.0e7% this is a comment", Object::Real(1.0e7)),
+        ];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+
+            let obj = lexer.next_obj(&mut container).ok_or("expected object")??;
+
+            assert_eq!(expect, obj);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_bad_numeric() -> Result<(), Box<dyn error::Error>> {
+        let inputs = ["1x0", "1.x0"];
+
+        for input in inputs {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+
+            assert_eq!(Object::Name(input.to_string()), name);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_numeric() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("1", Object::Integer(1)),
+            ("-1", Object::Integer(-1)),
+            ("1234567890", Object::Integer(1234567890)),
+            ("2147483648", Object::Real(2147483648.0)),
+            (".1", Object::Real(0.1)),
+            ("-.1", Object::Real(-0.1)),
+            ("1.234567890", Object::Real(1.234567890)),
+            ("1.2E7", Object::Real(1.2e7)),
+            ("1.2e7", Object::Real(1.2e7)),
+            ("-1.2e7", Object::Real(-1.2e7)),
+            ("1.2e-7", Object::Real(1.2e-7)),
+            ("-1.2e-7", Object::Real(-1.2e-7)),
+            ("2#1000", Object::Integer(0b1000)),
+            ("8#1777", Object::Integer(0o1777)),
+            ("16#fffe", Object::Integer(0xFFFE)),
+            ("16#FFFE", Object::Integer(0xFFFE)),
+            ("16#ffFE", Object::Integer(0xFFFE)),
+        ];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let obj = lexer.next_obj(&mut container).ok_or("expected object")??;
+
+            assert_eq!(expect, obj);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_bad_string() -> Result<(), Box<dyn error::Error>> {
+        let inputs = ["(this is a string", "(this is a string\\)"];
+
+        for input in inputs {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let result = lexer.next_obj(&mut container).ok_or("expected object")?;
+
+            assert!(result.is_err());
+            assert_eq!(ErrorKind::Syntax, result.unwrap_err().kind());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_string() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("(this is a string)", "this is a string"),
+            (
+                "(this is a multiline\nstring)",
+                "this is a multiline\nstring",
+            ),
+            (
+                "(this is a multiline\r\nstring)",
+                "this is a multiline\r\nstring",
+            ),
+            (
+                "(this has (nested) parenthesis)",
+                "this has (nested) parenthesis",
+            ),
+        ];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+                return Err("expected string object".into());
+            };
+
+            let string = container.get(str_idx)?;
+
+            assert_eq!(expect, string.inner);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_escaped_string() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("()", ""),
+            ("(\\n)", "\n"),
+            ("(\\r)", "\r"),
+            ("(\\t)", "\t"),
+            ("(\\b)", "\x08"),
+            ("(\\f)", "\x0C"),
+            ("(\\\\)", "\\"),
+            ("(\\()", "("),
+            ("(\\))", ")"),
+            ("(\\\n)", ""),
+            ("(\\\r)", ""),
+            ("(\\\r\n)", ""),
+        ];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+                return Err("expected string object".into());
+            };
+
+            let string = container.get(str_idx)?;
+
+            assert_eq!(expect, string.inner);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
+        let input = "(\\ii)";
+        let mut lexer = Lexer::from(input.chars());
+        let mut container = Container::default();
+
+        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+            return Err("expected string object".into());
+        };
+
+        let string = container.get(str_idx)?;
+
+        assert_eq!("ii", string.inner);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_octal_string() -> Result<(), Box<dyn error::Error>> {
+        let cases = [("(\\000)", "\0"), ("(\\377)", "ÿ")];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+                return Err("expected string object".into());
+            };
+
+            let string = container.get(str_idx)?;
+
+            assert_eq!(expect, string.inner);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_hex_string() -> Result<(), Box<dyn error::Error>> {
+        let cases = [
+            ("<736F6D65>", "some"),
+            ("<736f6d65>", "some"),
+            ("<736f6D65>", "some"),
+            ("<73 6F 6D 65>", "some"),
+            ("<70756D7>", "pump"),
+            ("<70756D70>", "pump"),
+        ];
+
+        for (input, expect) in cases {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+                return Err("expected string object".into());
+            };
+
+            let string = container.get(str_idx)?;
+
+            assert_eq!(expect, string.inner);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_base85_string() -> Result<(), Box<dyn error::Error>> {
+        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
+        let expect = "this is some text";
+        let mut lexer = Lexer::from(input.chars());
+        let mut container = Container::default();
+
+        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+            return Err("expected string object".into());
+        };
+
+        let string = container.get(str_idx)?;
+
+        assert_eq!(expect, string.inner);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_multiple_string() -> Result<(), Box<dyn error::Error>> {
+        let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
+        let expect = [
+            "this is a literal string",
+            "this is a hex string",
+            "this is a base85 string",
+        ];
+
+        let mut lexer = Lexer::from(input.chars());
+        let mut container = Container::default();
+
+        for e in expect {
+            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+                return Err("expected string object".into());
+            };
+
+            let string = container.get(str_idx)?;
+
+            assert_eq!(e, string.inner);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_name() -> Result<(), Box<dyn error::Error>> {
+        let inputs = [
+            "abc",
+            "Offset",
+            "$$",
+            "23A",
+            "13-456",
+            "a.b",
+            "$MyDict",
+            "@pattern",
+            "16#FFFF.LMAO",
+        ];
+
+        for input in inputs {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+
+            let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+
+            assert_eq!(Object::Name(input.to_string()), name);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_self_deliminating() -> Result<(), Box<dyn error::Error>> {
+        let inputs = [
+            ("mid[dle", "["),
+            ("mid]dle", "]"),
+            ("mid{dle", "{"),
+            ("mid}dle", "}"),
+            ("mid<<dle", "<<"),
+            ("mid>>dle", ">>"),
+            ("1[2", "["),
+            ("1]2", "]"),
+            ("1{2", "{"),
+            ("1}2", "}"),
+            ("1<<2", "<<"),
+            ("1>>2", ">>"),
+            ("1.2[3", "["),
+            ("1.2]3", "]"),
+            ("1.2{3", "{"),
+            ("1.2}3", "}"),
+            ("1.2<<3", "<<"),
+            ("1.2>>3", ">>"),
+            ("16#FF[FF", "["),
+            ("16#FF]FF", "]"),
+            ("16#FF{FF", "{"),
+            ("16#FF}FF", "}"),
+            ("16#FF<<FF", "<<"),
+            ("16#FF>>FF", ">>"),
+        ];
+
+        for (input, expect) in inputs {
+            let mut lexer = Lexer::from(input.chars());
+            let mut container = Container::default();
+            let _ = lexer.next_obj(&mut container);
+
+            let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+
+            assert_eq!(Object::Name(expect.to_string()), name);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_lex_all() -> Result<(), Box<dyn error::Error>> {
+        let input = "
+myStr (i have a string right here)
+myOtherStr (and
+another \
+right \
+here)
+% this is a comment
+myInt 1234567890
+myNegativeInt -1234567890
+myReal 3.1456
+myNegativeReal -3.1456
+        ";
+
+        let mut lexer = Lexer::from(input.chars());
+        let mut container = Container::default();
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myStr".to_string()), name);
+
+        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+            return Err("expected string object".into());
+        };
+        let string = container.get(str_idx)?;
+        assert_eq!("i have a string right here", string.inner);
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myOtherStr".to_string()), name);
+
+        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut container) else {
+            return Err("expected string object".into());
+        };
+        let string = container.get(str_idx)?;
+        assert_eq!("and\nanother right here", string.inner);
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myInt".to_string()), name);
+
+        let integer = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Integer(1234567890), integer);
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myNegativeInt".to_string()), name);
+
+        let integer = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Integer(-1234567890), integer);
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myReal".to_string()), name);
+
+        let integer = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Real(3.1456), integer);
+
+        let name = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Name("myNegativeReal".to_string()), name);
+
+        let integer = lexer.next_obj(&mut container).ok_or("expected object")??;
+        assert_eq!(Object::Real(-3.1456), integer);
+
+        Ok(())
+    }
 }

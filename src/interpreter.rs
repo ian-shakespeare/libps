@@ -6,6 +6,7 @@ use crate::{
     Error, ErrorKind, Lexer,
 };
 
+#[allow(dead_code)]
 pub struct Interpreter<I: Iterator<Item = char>> {
     lexer: Lexer<I>,
     operand_stack: Vec<Object>,
@@ -61,7 +62,7 @@ where
 
     fn execute_object(&mut self, obj: Object) -> crate::Result<()> {
         match obj {
-            Object::Integer(_) | Object::Real(_) | Object::Boolean(_) => {
+            Object::Integer(_) | Object::Real(_) | Object::Boolean(_) | Object::String(_) => {
                 self.operand_stack.push(obj)
             }
             Object::Name(name) => {
@@ -89,7 +90,7 @@ where
                     "counttomark" => self.counttomark()?,
                     "cleartomark" => self.cleartomark()?,
                     "add" => self.arithmetic(i32::checked_add, |a: f64, b: f64| a + b)?,
-                    "div" => self.arithmetic(i32::checked_div, |a: f64, b: f64| a / b)?,
+                    "div" => self.arithmetic(|_, _| None, |a: f64, b: f64| a / b)?,
                     "idiv" => self.idiv()?,
                     "imod" => self.imod()?,
                     "mul" => self.arithmetic(i32::checked_mul, |a: f64, b: f64| a * b)?,
@@ -100,18 +101,18 @@ where
                     "floor" => self.num_unary(|a: i32| Some(a), f64::floor)?,
                     "round" => self.num_unary(|a: i32| Some(a), f64::round)?,
                     "truncate" => self.num_unary(|a: i32| Some(a), f64::trunc)?,
-                    "sqrt" => self.num_unary(|_| None, f64::sqrt)?,
+                    "sqrt" => self.real_unary(f64::sqrt)?,
                     "atan" => self.arithmetic(
                         |_, _| None,
-                        |den: f64, num: f64| {
+                        |num: f64, den: f64| {
                             positive_degrees(radians_to_degrees((num / den).atan()))
                         },
                     )?,
-                    "cos" => self.num_unary(|_| None, f64::cos)?,
-                    "sin" => self.num_unary(|_| None, f64::sin)?,
-                    "exp" => self.arithmetic(|_, _| None, |exp: f64, base: f64| base.powf(exp))?,
-                    "ln" => self.num_unary(|_| None, f64::ln)?,
-                    "log" => self.num_unary(|_| None, f64::log10)?,
+                    "cos" => self.real_unary(|a: f64| degrees_to_radians(a).cos())?,
+                    "sin" => self.real_unary(|a: f64| degrees_to_radians(a).sin())?,
+                    "exp" => self.arithmetic(|_, _| None, |base: f64, exp: f64| base.powf(exp))?,
+                    "ln" => self.real_unary(f64::ln)?,
+                    "log" => self.real_unary(f64::log10)?,
                     "rand" => self.rand()?,
                     "srand" => self.srand()?,
                     "rrand" => self.rrand()?,
@@ -128,7 +129,7 @@ where
                     _ => return Err(Error::new(ErrorKind::Undefined, name)),
                 }
             }
-            _ => {}
+            _ => return Err(Error::new(ErrorKind::Unregistered, "not implemented")),
         }
 
         Ok(())
@@ -321,9 +322,19 @@ where
         let lhs = self.pop()?;
 
         if lhs.is_int() && rhs.is_int() {
-            let obj = match checked(lhs.into_int()?, rhs.into_int()?) {
+            let lhs = lhs.into_int()?;
+            let rhs = rhs.into_int()?;
+
+            let obj = match checked(lhs, rhs) {
                 Some(total) => Object::Integer(total),
-                None => Object::Real(real(lhs.into_real()?, rhs.into_real()?)),
+                None => {
+                    let total = real(f64::from(lhs), f64::from(rhs));
+                    if !is_valid_real(total) {
+                        return Err(Error::from(ErrorKind::UndefinedResult));
+                    }
+
+                    Object::Real(total)
+                }
             };
 
             self.push(obj);
@@ -333,7 +344,7 @@ where
 
         let total = real(lhs.into_real()?, rhs.into_real()?);
 
-        if !total.is_finite() || total.is_nan() {
+        if !is_valid_real(total) {
             return Err(Error::from(ErrorKind::UndefinedResult));
         }
 
@@ -361,6 +372,20 @@ where
         }
 
         self.push(Object::Real(real(n.into_real()?)));
+
+        Ok(())
+    }
+
+    fn real_unary(&mut self, unary: impl Fn(f64) -> f64) -> crate::Result<()> {
+        let n = self.pop_real()?;
+
+        let total = unary(n);
+
+        if !is_valid_real(total) {
+            return Err(Error::from(ErrorKind::UndefinedResult));
+        }
+
+        self.push(Object::Real(total));
 
         Ok(())
     }
@@ -394,7 +419,7 @@ where
     }
 
     fn rand(&mut self) -> crate::Result<()> {
-        let n = self.rng.rand();
+        let n = self.rng.rand().abs();
 
         self.push(Object::Integer(n));
 
@@ -647,6 +672,7 @@ where
 
     fn pop_real(&mut self) -> crate::Result<f64> {
         match self.pop()? {
+            Object::Integer(i) => Ok(f64::from(i)),
             Object::Real(r) => Ok(r),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
         }
@@ -704,11 +730,13 @@ fn usize_to_i32(u: usize) -> crate::Result<i32> {
     Ok(i)
 }
 
+fn is_valid_real(n: f64) -> bool {
+    n.is_finite() && !n.is_nan()
+}
+
 #[cfg(test)]
 mod tests {
     use std::error;
-
-    use crate::interpreter;
 
     use super::*;
 
