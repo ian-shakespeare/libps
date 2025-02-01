@@ -79,7 +79,10 @@ where
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
-            return Err(Error::new(ErrorKind::Syntax, "unterminated hex string"));
+            return Err(Error::new(
+                ErrorKind::SyntaxError,
+                "unterminated hex string",
+            ));
         };
 
         match ch {
@@ -196,10 +199,18 @@ where
 
         loop {
             match self.input.next() {
-                None => return Err(Error::new(ErrorKind::Syntax, "unterminated base85 string")),
+                None => {
+                    return Err(Error::new(
+                        ErrorKind::SyntaxError,
+                        "unterminated base85 string",
+                    ))
+                }
                 Some('~') => match self.input.peek() {
                     None => {
-                        return Err(Error::new(ErrorKind::Syntax, "unterminated base85 string"))
+                        return Err(Error::new(
+                            ErrorKind::SyntaxError,
+                            "unterminated base85 string",
+                        ))
                     }
                     Some('>') => break,
                     _ => continue,
@@ -234,13 +245,13 @@ where
             }
 
             let Some(ch) = self.input.next() else {
-                return Err(Error::new(ErrorKind::Syntax, "unterminated string"));
+                return Err(Error::new(ErrorKind::SyntaxError, "unterminated string"));
             };
 
             match ch {
                 '>' => break,
                 '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch),
-                _ => return Err(Error::new(ErrorKind::Syntax, "invalid hex string")),
+                _ => return Err(Error::new(ErrorKind::SyntaxError, "invalid hex string")),
             }
         }
 
@@ -268,7 +279,7 @@ where
 
         loop {
             let Some(ch) = self.input.next() else {
-                return Err(Error::new(ErrorKind::Syntax, "unterminated string"));
+                return Err(Error::new(ErrorKind::SyntaxError, "unterminated string"));
             };
 
             match ch {
@@ -300,7 +311,10 @@ where
                         ')' => string.push(')'),
                         '\r' => match self.input.peek() {
                             None => {
-                                return Err(Error::new(ErrorKind::Syntax, "unterminated string"))
+                                return Err(Error::new(
+                                    ErrorKind::SyntaxError,
+                                    "unterminated string",
+                                ))
                             }
                             Some('\n') => {
                                 let _ = self.input.next();
@@ -314,7 +328,7 @@ where
                                         String::from_iter([next_ch, second_digit, third_digit]);
 
                                     match u8::from_str_radix(&octal, 8) {
-                                        Err(_) => return Err(Error::from(ErrorKind::Syntax)),
+                                        Err(_) => return Err(Error::from(ErrorKind::SyntaxError)),
                                         Ok(value) => {
                                             string.push(value.into());
                                             let _ = self.input.next();
@@ -322,7 +336,7 @@ where
                                         }
                                     }
                                 }
-                                _ => return Err(Error::from(ErrorKind::Syntax)),
+                                _ => return Err(Error::from(ErrorKind::SyntaxError)),
                             }
                         }
                         _ => string.push(next_ch),
@@ -347,7 +361,7 @@ where
     fn expect_char(&mut self, ch: char) -> crate::Result<()> {
         match self.input.next() {
             Some(received) if ch == received => Ok(()),
-            _ => Err(Error::new(ErrorKind::Syntax, format!("expected {ch}"))),
+            _ => Err(Error::new(ErrorKind::SyntaxError, format!("expected {ch}"))),
         }
     }
 
@@ -469,7 +483,7 @@ mod tests {
             let result = lexer.next_obj(&mut container).ok_or("expected object")?;
 
             assert!(result.is_err());
-            assert_eq!(ErrorKind::Syntax, result.unwrap_err().kind());
+            assert_eq!(ErrorKind::SyntaxError, result.unwrap_err().kind());
         }
 
         Ok(())
