@@ -12,11 +12,11 @@ cargo run
 
 ## Contributing
 
-We actively encourage contributions! Read our [contribution guide] to get started.
+We actively encourage contributions! Read our [contribution guide](https://github.com/ian-shakespeare/libps/blob/main/CONTRIBUTING.md) to get started.
 
 ## License
 
-Unless otherwise noted, the libPS source files are distributed under the [BSD 3-Clause license] found in the LICENSE file.
+Unless otherwise noted, the libPS source files are distributed under the [BSD 3-Clause license](https://github.com/ian-shakespeare/libps/blob/main/LICENSE.md) found in the LICENSE file.
 
 ## Contributions
 
