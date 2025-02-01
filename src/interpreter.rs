@@ -213,27 +213,27 @@ where
     }
 
     fn roll(&mut self) -> crate::Result<()> {
-        let mut temp_stack = Vec::new();
-        let mut shift_stack = Vec::new();
+        let mut top_stack = Vec::new();
+        let mut bottom_stack = Vec::new();
 
         let j = self.pop_int()?;
         let n = self.pop_int()?;
 
-        let j = j % n;
+        let j = (n + j) % n;
         for i in 0..n {
             let obj = self.pop()?;
             if i < j {
-                shift_stack.push(obj);
+                bottom_stack.push(obj);
             } else {
-                temp_stack.push(obj);
+                top_stack.push(obj);
             }
         }
 
-        while let Some(obj) = shift_stack.pop() {
+        while let Some(obj) = bottom_stack.pop() {
             self.push(obj);
         }
 
-        while let Some(obj) = temp_stack.pop() {
+        while let Some(obj) = top_stack.pop() {
             self.push(obj);
         }
 
@@ -877,8 +877,15 @@ mod tests {
 
     #[test]
     fn test_roll() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 3 3 2 roll".chars());
+        let mut interpreter = Interpreter::new("1 2 3 3 1 roll".chars());
+        interpreter.evaluate()?;
 
+        assert_eq!(3, interpreter.operand_stack.len());
+        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
+        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
+        assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
+
+        let mut interpreter = Interpreter::new("1 2 3 3 -1 roll".chars());
         interpreter.evaluate()?;
 
         assert_eq!(3, interpreter.operand_stack.len());
