@@ -36,7 +36,7 @@ pub fn encode_ascii85(raw: &str) -> crate::Result<String> {
 
                 if !(33..=117).contains(&ascii_ch) {
                     return Err(Error::new(
-                        ErrorKind::Syntax,
+                        ErrorKind::SyntaxError,
                         "received unprintable character",
                     ));
                 }
@@ -77,7 +77,7 @@ pub fn decode_ascii85(encoded: &str) -> crate::Result<String> {
 
             for shift in [24, 16, 8, 0] {
                 match char::from_u32((pattern >> shift) & 0b11111111) {
-                    None => return Err(Error::from(ErrorKind::Syntax)),
+                    None => return Err(Error::from(ErrorKind::SyntaxError)),
                     Some(ch) => decoded_chunk.push(ch),
                 }
             }
@@ -126,7 +126,7 @@ pub fn decode_hex(encoded: &str) -> crate::Result<String> {
 
             if let Ok(code) = str::from_utf8(&chunk) {
                 match u8::from_str_radix(code, 16) {
-                    Err(_) => return Err(Error::from(ErrorKind::Syntax)),
+                    Err(_) => return Err(Error::from(ErrorKind::SyntaxError)),
                     Ok(ch) => decoded.push(ch.into()),
                 }
             }

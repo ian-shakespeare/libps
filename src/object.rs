@@ -1,17 +1,56 @@
-use std::{collections, rc};
+use std::collections;
+
+use crate::{Error, ErrorKind};
+
+#[derive(Default)]
+pub enum Access {
+    #[default]
+    Unlimited,
+    ReadOnly,
+    ExecuteOnly,
+    None,
+}
+
+pub struct Composite<T> {
+    pub inner: T,
+    pub access: Access,
+    pub len: usize,
+}
+
+impl<T> Composite<T> {
+    pub fn is_read_only(&self) -> bool {
+        matches!(self.access, Access::ReadOnly)
+    }
+
+    pub fn is_exec_only(&self) -> bool {
+        matches!(self.access, Access::ExecuteOnly)
+    }
+
+    pub fn has_no_access(&self) -> bool {
+        matches!(self.access, Access::None)
+    }
+
+    pub fn is_writeable(&self) -> bool {
+        matches!(self.access, Access::Unlimited)
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.is_writeable() || self.is_readable()
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer(i32),
     Real(f64),
     Boolean(bool),
-    Array(rc::Rc<Vec<Object>>),
-    PackedArray(rc::Rc<Vec<Object>>),
-    String(String),
-    LiteralName(String),
+    Array(usize),
+    PackedArray(usize),
+    String(usize),
+    Dictionary(usize),
+    Literal(String),
     Name(String),
-    Dictionary(rc::Rc<collections::HashMap<String, Object>>),
-    // File(Box<fs::File>),
+    File,
     Mark,
     Null,
     Save,
@@ -25,31 +64,7 @@ impl From<Object> for String {
             Object::Integer(value) => value.to_string(),
             Object::Real(value) => value.to_string(),
             Object::Boolean(value) => value.to_string(),
-            Object::String(value) | Object::Name(value) => value,
-            Object::Array(values) => {
-                let mut output = String::from('[');
-                for obj in values.iter() {
-                    output.push_str(&format!(" {}", &String::from(obj.clone())))
-                }
-                output.push_str(" ]");
-                output
-            }
-            Object::PackedArray(values) => {
-                let mut output = String::from('{');
-                for obj in values.iter() {
-                    output.push_str(&format!(" {}", &String::from(obj.clone())))
-                }
-                output.push_str(" }");
-                output
-            }
-            Object::Dictionary(values) => {
-                let mut output = String::from("<<");
-                for (key, value) in values.iter() {
-                    output.push_str(&format!(" {} {}", &key, &String::from(value.clone())));
-                }
-                output.push_str(" >>");
-                output
-            }
+            Object::Name(value) => value,
             _ => "".to_string(),
         }
     }
@@ -68,44 +83,101 @@ impl PartialEq for Object {
                 Self::Real(other_value) => value == other_value,
                 _ => false,
             },
-            Self::Boolean(value) => {
-                if let Self::Boolean(other_value) = other {
-                    value == other_value
-                } else {
-                    false
-                }
-            }
-            Self::Array(value) => {
-                if let Self::Array(other_value) = other {
-                    value.as_ptr() == other_value.as_ptr()
-                } else {
-                    false
-                }
-            }
-            Self::PackedArray(value) => {
-                if let Self::PackedArray(other_value) = other {
-                    value.as_ptr() == other_value.as_ptr()
-                } else {
-                    false
-                }
-            }
-            Self::String(value) => {
-                if let Self::String(other_value) = other {
-                    value == other_value
-                } else {
-                    false
-                }
-            }
-            Self::Name(value) => {
-                if let Self::Name(other_value) = other {
-                    value == other_value
-                } else {
-                    false
-                }
-            }
+            Self::Boolean(value) => match other {
+                Self::Boolean(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::Array(value) => match other {
+                Self::Array(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::PackedArray(value) => match other {
+                Self::PackedArray(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::String(value) => match other {
+                Self::String(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::Literal(value) => match other {
+                Self::Literal(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::Name(value) => match other {
+                Self::Name(other_value) => value == other_value,
+                _ => false,
+            },
+            Self::Null => matches!(other, Self::Null),
             _ => false,
         }
     }
 }
 
 impl Eq for Object {}
+
+impl Object {
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::Integer(_))
+    }
+
+    pub fn is_real(&self) -> bool {
+        matches!(self, Self::Real(_))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, Self::String(_))
+    }
+
+    pub fn into_int(&self) -> crate::Result<i32> {
+        match self {
+            Self::Integer(i) => Ok(*i),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
+        }
+    }
+
+    pub fn into_real(&self) -> crate::Result<f64> {
+        match self {
+            Self::Integer(i) => Ok(f64::from(*i)),
+            Self::Real(r) => Ok(*r),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+        }
+    }
+}
+
+pub struct Container<V> {
+    inner: collections::HashMap<usize, V>,
+    counter: usize,
+}
+
+impl<V> Default for Container<V> {
+    fn default() -> Self {
+        Self {
+            inner: collections::HashMap::new(),
+            counter: 0,
+        }
+    }
+}
+
+impl<V> Container<V> {
+    pub fn insert(&mut self, v: V) -> usize {
+        self.counter += 1;
+
+        let _ = self.inner.insert(self.counter, v);
+
+        self.counter
+    }
+
+    pub fn get(&mut self, k: usize) -> crate::Result<&V> {
+        match self.inner.get(&k) {
+            Some(v) => Ok(v),
+            None => Err(Error::from(ErrorKind::VmError)),
+        }
+    }
+
+    pub fn get_mut(&mut self, k: usize) -> crate::Result<&mut V> {
+        match self.inner.get_mut(&k) {
+            Some(v) => Ok(v),
+            None => Err(Error::from(ErrorKind::VmError)),
+        }
+    }
+}

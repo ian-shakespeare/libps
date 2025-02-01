@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, process};
 
 use libps::eval;
 
@@ -9,6 +9,8 @@ fn main() {
         panic!("Failed to read input.");
     }
 
-    eval(&buf);
-    // scan(&buf);
+    if let Err(e) = eval(&buf) {
+        eprintln!("{}", e);
+        process::exit(1);
+    }
 }
