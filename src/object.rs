@@ -25,6 +25,18 @@ impl<T> Composite<T> {
     pub fn is_exec_only(&self) -> bool {
         matches!(self.access, Access::ExecuteOnly)
     }
+
+    pub fn has_no_access(&self) -> bool {
+        matches!(self.access, Access::None)
+    }
+
+    pub fn is_writeable(&self) -> bool {
+        matches!(self.access, Access::Unlimited)
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.is_writeable() || self.is_readable()
+    }
 }
 
 #[derive(Clone, Debug)]

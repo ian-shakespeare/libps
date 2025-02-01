@@ -530,7 +530,7 @@ where
         let index = self.pop_usize()?;
         let arr = self.pop_array_mut()?;
 
-        if arr.is_read_only() || arr.is_exec_only() {
+        if !arr.is_writeable() {
             return Err(Error::from(ErrorKind::InvalidAccess));
         }
 
@@ -548,7 +548,7 @@ where
         let index = self.pop_usize()?;
         let arr = self.pop_array()?;
 
-        if arr.is_exec_only() {
+        if !arr.is_readable() {
             return Err(Error::from(ErrorKind::InvalidAccess));
         }
 
@@ -581,7 +581,7 @@ where
     fn putinterval(&mut self) -> crate::Result<()> {
         let source = self.pop_array()?;
 
-        if source.is_exec_only() {
+        if !source.is_readable() {
             return Err(Error::from(ErrorKind::InvalidAccess));
         }
 
@@ -590,7 +590,7 @@ where
         let index = self.pop_usize()?;
         let destination = self.pop_array_mut()?;
 
-        if destination.is_read_only() || destination.is_exec_only() {
+        if !destination.is_writeable() {
             return Err(Error::from(ErrorKind::InvalidAccess));
         }
 
@@ -611,7 +611,13 @@ where
         };
 
         let len = match self.arrays.get(arr_idx) {
-            Ok(Composite { len, .. }) => Ok(*len),
+            Ok(composite) => {
+                if !composite.is_writeable() {
+                    Err(Error::from(ErrorKind::InvalidAccess))
+                } else {
+                    Ok(composite.len)
+                }
+            }
             Err(_) => Err(Error::from(ErrorKind::Undefined)),
         }?;
 
@@ -633,7 +639,7 @@ where
     fn aload(&mut self) -> crate::Result<()> {
         let arr = self.pop_array()?;
 
-        if arr.is_exec_only() {
+        if !arr.is_readable() {
             return Err(Error::from(ErrorKind::InvalidAccess));
         }
 
