@@ -64,7 +64,7 @@ where
         match obj {
             Object::Integer(_) | Object::Real(_) | Object::Boolean(_) | Object::String(_) => {
                 self.operand_stack.push(obj)
-            }
+            },
             Object::Name(name) => {
                 if let Some(obj) = self.user_dict.get(&name) {
                     return self.execute_object(obj.clone());
@@ -80,7 +80,7 @@ where
                     "exch" => self.exch()?,
                     "pop" => {
                         self.pop()?;
-                    }
+                    },
                     "copy" => self.copy()?,
                     "roll" => self.roll()?,
                     "index" => self.index()?,
@@ -128,7 +128,7 @@ where
                     "aload" => self.aload()?,
                     _ => return Err(Error::new(ErrorKind::Undefined, name)),
                 }
-            }
+            },
             _ => return Err(Error::new(ErrorKind::Unregistered, "not implemented")),
         }
 
@@ -181,7 +181,7 @@ where
                 }
 
                 Ok(())
-            }
+            },
             Object::Array(dest_idx) => {
                 let source = self.pop_array()?;
 
@@ -207,7 +207,7 @@ where
                 self.push(Object::Array(dest_idx));
 
                 Ok(())
-            }
+            },
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
         }
     }
@@ -255,7 +255,7 @@ where
             Some(obj) => {
                 self.push(obj.clone());
                 Ok(())
-            }
+            },
             None => Err(Error::from(ErrorKind::RangeCheck)),
         }
     }
@@ -306,7 +306,7 @@ where
                     if matches!(obj, Object::Mark) {
                         break;
                     }
-                }
+                },
             }
         }
 
@@ -334,7 +334,7 @@ where
                     }
 
                     Object::Real(total)
-                }
+                },
             };
 
             self.push(obj);
@@ -476,7 +476,7 @@ where
                     }
 
                     arr.push(obj);
-                }
+                },
             }
         }
 
@@ -617,7 +617,7 @@ where
                 } else {
                     Ok(composite.len)
                 }
-            }
+            },
             Err(_) => Err(Error::from(ErrorKind::Undefined)),
         }?;
 
@@ -631,7 +631,7 @@ where
             Ok(composite) => {
                 composite.inner = stored;
                 Ok(())
-            }
+            },
             Err(_) => Err(Error::from(ErrorKind::Undefined)),
         }
     }
