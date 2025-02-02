@@ -1,0 +1,7 @@
+condense_wildcard_suffixes = true
+edition = "2021"
+force_multiline_blocks = true
+format_macro_matchers = true
+format_macro_bodies = true
+match_block_trailing_comma = true
+reorder_impl_items = true

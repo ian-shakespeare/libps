@@ -45,16 +45,16 @@ where
                     if let Err(e) = self.lex_comment() {
                         return Some(Err(e));
                     }
-                }
+                },
                 '-' | '.' | '0'..='9' => {
                     return Some(self.lex_numeric());
-                }
+                },
                 '(' => return Some(self.lex_string_literal(strings)),
                 '<' => return Some(self.lex_gt(strings)),
                 _ => {
                     let name = String::from(self.input.next()?);
                     return Some(self.lex_name(name));
-                }
+                },
             };
         }
     }
@@ -67,7 +67,7 @@ where
                 None => break,
                 Some(ch) => match ch {
                     '\n' | FORM_FEED => break,
-                    _ => {}
+                    _ => {},
                 },
             }
         }
@@ -148,7 +148,7 @@ where
                 'e' | 'E' => numeric.push('E'),
                 _ => {
                     numeric.push(ch);
-                }
+                },
             }
         }
 
@@ -177,10 +177,10 @@ where
                         (Ok(decimal), Ok(exponent)) => {
                             let value = decimal * 10.0_f64.powi(exponent);
                             Ok(Object::Real(value))
-                        }
+                        },
                         _ => self.lex_name(numeric),
                     }
-                }
+                },
                 _ => self.lex_name(numeric),
             };
         }
@@ -207,14 +207,14 @@ where
                         ErrorKind::SyntaxError,
                         "unterminated base85 string",
                     ))
-                }
+                },
                 Some('~') => match self.input.peek() {
                     None => {
                         return Err(Error::new(
                             ErrorKind::SyntaxError,
                             "unterminated base85 string",
                         ))
-                    }
+                    },
                     Some('>') => break,
                     _ => continue,
                 },
@@ -289,14 +289,14 @@ where
                 '(' => {
                     string.push(ch);
                     active_parenthesis += 1;
-                }
+                },
                 ')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
                     string.push(ch);
                     active_parenthesis -= 1;
-                }
+                },
                 '\\' => {
                     let next_ch = match self.input.next() {
                         None => Err(Error::new(ErrorKind::IoError, "unexpected eof")),
@@ -318,11 +318,11 @@ where
                                     ErrorKind::SyntaxError,
                                     "unterminated string",
                                 ))
-                            }
+                            },
                             Some('\n') => {
                                 let _ = self.input.next();
-                            }
-                            _ => {}
+                            },
+                            _ => {},
                         },
                         '0'..='9' => {
                             match (self.input.peek().cloned(), self.input.peek().cloned()) {
@@ -336,15 +336,15 @@ where
                                             string.push(value.into());
                                             let _ = self.input.next();
                                             let _ = self.input.next();
-                                        }
+                                        },
                                     }
-                                }
+                                },
                                 _ => return Err(Error::from(ErrorKind::SyntaxError)),
                             }
-                        }
+                        },
                         _ => string.push(next_ch),
                     }
-                }
+                },
                 _ => string.push(ch),
             }
         }
