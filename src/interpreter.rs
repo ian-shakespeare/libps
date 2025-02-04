@@ -8,14 +8,15 @@ use crate::{
 
 #[allow(dead_code)]
 pub struct Interpreter<I: Iterator<Item = char>> {
-    lexer: Lexer<I>,
-    operand_stack: Vec<Object>,
+    arrays: Container<Composite<Vec<Object>>>,
     execution_stack: Vec<Object>,
     global_dict: collections::HashMap<String, Object>,
-    user_dict: collections::HashMap<String, Object>,
-    strings: Container<Composite<String>>,
-    arrays: Container<Composite<Vec<Object>>>,
+    is_packing: bool,
+    lexer: Lexer<I>,
+    operand_stack: Vec<Object>,
     rng: RandomNumberGenerator,
+    strings: Container<Composite<String>>,
+    user_dict: collections::HashMap<String, Object>,
 }
 
 impl<I> From<Lexer<I>> for Interpreter<I>
@@ -24,14 +25,15 @@ where
 {
     fn from(value: Lexer<I>) -> Self {
         Self {
-            lexer: value,
-            operand_stack: Vec::new(),
+            arrays: Container::default(),
             execution_stack: Vec::new(),
             global_dict: collections::HashMap::new(),
-            user_dict: collections::HashMap::new(),
-            strings: Container::default(),
-            arrays: Container::default(),
+            is_packing: false,
+            lexer: value,
+            operand_stack: Vec::new(),
             rng: RandomNumberGenerator::default(),
+            strings: Container::default(),
+            user_dict: collections::HashMap::new(),
         }
     }
 }
@@ -46,6 +48,7 @@ where
             operand_stack: Vec::new(),
             execution_stack: Vec::new(),
             global_dict: collections::HashMap::new(),
+            is_packing: false,
             user_dict: collections::HashMap::new(),
             strings: Container::default(),
             arrays: Container::default(),
@@ -126,6 +129,9 @@ where
                     "putinterval" => self.putinterval()?,
                     "astore" => self.astore()?,
                     "aload" => self.aload()?,
+                    "packedarray" => self.packedarray()?,
+                    "setpacking" => self.setpacking()?,
+                    "currentpacking" => self.currentpacking()?,
                     _ => return Err(Error::new(ErrorKind::Undefined, name)),
                 }
             },
@@ -183,7 +189,16 @@ where
                 Ok(())
             },
             Object::Array(dest_idx) => {
-                let source = self.pop_array()?;
+                let obj = self.pop()?;
+
+                let source = match obj {
+                    Object::Array(idx) | Object::PackedArray(idx) => {
+                        let arr = self.arrays.get(idx)?;
+
+                        Ok(arr)
+                    },
+                    _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+                }?;
 
                 if source.is_exec_only() {
                     return Err(Error::from(ErrorKind::InvalidAccess));
@@ -490,13 +505,22 @@ where
     }
 
     fn length(&mut self) -> crate::Result<()> {
-        let arr = self.pop_array()?;
+        let obj = self.pop()?;
 
-        if !arr.is_readable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
+        let len = match obj {
+            Object::Array(idx) | Object::PackedArray(idx) => {
+                let arr = self.arrays.get(idx)?;
 
-        let i = usize_to_i32(arr.len)?;
+                if !arr.is_readable() {
+                    return Err(Error::from(ErrorKind::InvalidAccess));
+                }
+
+                Ok(arr.len)
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }?;
+
+        let i = usize_to_i32(len)?;
         self.push(Object::Integer(i));
 
         Ok(())
@@ -504,15 +528,23 @@ where
 
     fn get(&mut self) -> crate::Result<()> {
         let index = self.pop_usize()?;
-        let arr = self.pop_array()?;
+        let obj = self.pop()?;
 
-        if arr.is_exec_only() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
+        let obj = match obj {
+            Object::Array(idx) | Object::PackedArray(idx) => {
+                let arr = self.arrays.get(idx)?;
 
-        let Some(obj) = arr.inner.get(index).cloned() else {
-            return Err(Error::from(ErrorKind::RangeCheck));
-        };
+                if arr.is_exec_only() {
+                    return Err(Error::from(ErrorKind::InvalidAccess));
+                }
+
+                match arr.inner.get(index) {
+                    Some(obj) => Ok(obj.clone()),
+                    None => Err(Error::from(ErrorKind::RangeCheck)),
+                }
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }?;
 
         self.push(obj);
 
@@ -540,24 +572,31 @@ where
     fn getinterval(&mut self) -> crate::Result<()> {
         let count = self.pop_usize()?;
         let index = self.pop_usize()?;
-        let arr = self.pop_array()?;
+        let obj = self.pop()?;
 
-        if !arr.is_readable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
+        let arr = match obj {
+            Object::Array(idx) | Object::PackedArray(idx) => {
+                let arr = self.arrays.get(idx)?;
 
-        if index >= arr.len {
+                if !arr.is_readable() {
+                    return Err(Error::from(ErrorKind::InvalidAccess));
+                }
+
+                Ok(arr.inner.clone())
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }?;
+
+        if index >= arr.len() {
             return Err(Error::from(ErrorKind::RangeCheck));
         }
 
         let mut subarr = Vec::with_capacity(count);
 
         for i in index..(index + count) {
-            let Some(obj) = arr.inner.get(i).cloned() else {
-                return Err(Error::from(ErrorKind::RangeCheck));
-            };
+            let obj = arr.get(i).ok_or(Error::from(ErrorKind::RangeCheck))?;
 
-            subarr.push(obj);
+            subarr.push(obj.clone());
         }
 
         let composite = Composite {
@@ -631,21 +670,58 @@ where
     }
 
     fn aload(&mut self) -> crate::Result<()> {
-        let arr_idx = self.pop_array_index()?;
+        let obj = self.pop()?;
 
-        let arr = self.arrays.get(arr_idx)?;
+        let (idx, arr) = match obj {
+            Object::Array(idx) | Object::PackedArray(idx) => {
+                let arr = self.arrays.get(idx)?;
 
-        if !arr.is_readable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
+                if !arr.is_readable() {
+                    return Err(Error::from(ErrorKind::InvalidAccess));
+                }
+
+                Ok((idx, arr.inner.clone()))
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }?;
+
+        for obj in arr {
+            self.push(obj);
         }
 
-        let objs = arr.inner.clone();
+        self.push(Object::Array(idx));
 
-        for obj in objs {
-            self.push(obj.clone());
-        }
+        Ok(())
+    }
 
-        self.push(Object::Array(arr_idx));
+    fn packedarray(&mut self) -> crate::Result<()> {
+        let len = self.pop_usize()?;
+
+        let inner = vec![Object::Null; len];
+
+        let composite = Composite {
+            access: Access::ReadOnly,
+            len,
+            inner,
+        };
+
+        let index = self.arrays.insert(composite);
+
+        self.push(Object::PackedArray(index));
+
+        Ok(())
+    }
+
+    fn setpacking(&mut self) -> crate::Result<()> {
+        let b = self.pop_bool()?;
+
+        self.is_packing = b;
+
+        Ok(())
+    }
+
+    fn currentpacking(&mut self) -> crate::Result<()> {
+        self.push(Object::Boolean(self.is_packing));
 
         Ok(())
     }
@@ -705,10 +781,10 @@ where
         }
     }
 
-    fn pop_array_index(&mut self) -> crate::Result<usize> {
+    fn pop_bool(&mut self) -> crate::Result<bool> {
         match self.pop()? {
-            Object::Array(idx) => Ok(idx),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+            Object::Boolean(b) => Ok(b),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected boolean")),
         }
     }
 }
@@ -1679,16 +1755,23 @@ mod tests {
 
     #[test]
     fn test_length() -> Result<(), Box<dyn error::Error>> {
-        for length in 0..5 {
-            let input = "[ ".to_string() + &format!("0 ").repeat(length) + "] length";
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+        let mut interpreter = Interpreter::new("[ 1 2 3 4 5 ] length".chars());
+        interpreter.evaluate()?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(5, interpreter.pop_int()?);
 
-            let obj = interpreter.operand_stack.pop().ok_or("expected object")?;
-            assert_eq!(Object::Integer(length.try_into()?), obj);
-        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_length_packedarray() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::new("5 packedarray length".chars());
+        interpreter.evaluate()?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(5, interpreter.pop_int()?);
+
         Ok(())
     }
 
@@ -1697,13 +1780,23 @@ mod tests {
         for i in 0..5 {
             let input = format!("[ 1 2 3 4 5 ] {i} get");
             let mut interpreter = Interpreter::new(input.chars());
-
             interpreter.evaluate()?;
 
             let received = interpreter.pop_int()?;
 
             assert_eq!(i + 1, received);
         }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_packedarray() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::new("1 packedarray 0 get".chars());
+        interpreter.evaluate()?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert!(matches!(interpreter.pop()?, Object::Null));
 
         Ok(())
     }
@@ -2021,5 +2114,83 @@ mod tests {
         let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_packedarray() -> Result<(), Box<dyn error::Error>> {
+        for num in 0..5 {
+            let input = format!("{num} packedarray");
+            let mut interpreter = Interpreter::new(input.chars());
+
+            interpreter.evaluate()?;
+
+            assert_eq!(1, interpreter.operand_stack.len());
+            let Some(Object::PackedArray(arr_idx)) = interpreter.operand_stack.pop() else {
+                return Err("expected packed array object".into());
+            };
+
+            let arr = interpreter.arrays.get(arr_idx)?;
+            assert!(arr.is_read_only());
+            assert_eq!(num, arr.inner.len());
+            assert!(arr.inner.iter().all(|obj| matches!(obj, Object::Null)));
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_packedarray_typecheck() {
+        let mut interpreter = Interpreter::new("(str) packedarray".chars());
+
+        let result = interpreter.evaluate();
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_packedarray_underflow() {
+        let mut interpreter = Interpreter::new("packedarray".chars());
+
+        let result = interpreter.evaluate();
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_setpacking() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::new("true setpacking".chars());
+        interpreter.evaluate()?;
+        assert!(interpreter.is_packing);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_setpacking_typecheck() {
+        let mut interpreter = Interpreter::new("(str) setpacking".chars());
+
+        let result = interpreter.evaluate();
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_setpacking_underflow() {
+        let mut interpreter = Interpreter::new("setpacking".chars());
+
+        let result = interpreter.evaluate();
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_currentpacking() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::new("true setpacking currentpacking".chars());
+        interpreter.evaluate()?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert!(interpreter.pop_bool()?);
+
+        Ok(())
     }
 }
