@@ -35,7 +35,7 @@ impl<T> Composite<T> {
     }
 
     pub fn is_readable(&self) -> bool {
-        self.is_writeable() || self.is_readable()
+        self.is_writeable() || self.is_read_only()
     }
 }
 
