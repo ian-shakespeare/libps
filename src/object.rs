@@ -1,6 +1,6 @@
-use std::collections;
+use std::collections::HashMap;
 
-use crate::{Error, ErrorKind};
+use crate::{interpreter::InterpreterState, Error, ErrorKind};
 
 #[derive(Default)]
 pub enum Access {
@@ -50,6 +50,7 @@ pub enum Object {
     Dictionary(usize),
     Literal(String),
     Name(String),
+    Operator(fn(&mut InterpreterState) -> crate::Result<()>),
     File,
     Mark,
     Null,
@@ -149,14 +150,14 @@ impl Object {
 }
 
 pub struct Container<V> {
-    inner: collections::HashMap<usize, V>,
+    inner: HashMap<usize, V>,
     counter: usize,
 }
 
 impl<V> Default for Container<V> {
     fn default() -> Self {
         Self {
-            inner: collections::HashMap::new(),
+            inner: HashMap::new(),
             counter: 0,
         }
     }
