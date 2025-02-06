@@ -1,16 +1,43 @@
-use std::{io, process};
+use std::{
+    io::{self, BufRead, Write},
+    process,
+};
 
-use libps::eval;
+use libps::Interpreter;
 
-fn main() {
-    let input = io::stdin();
+fn fatal(message: &str) -> ! {
+    eprintln!("{}", message);
+
+    process::exit(1)
+}
+
+fn main() -> io::Result<()> {
+    let mut input = io::stdin().lock();
+    let mut output = io::stdout().lock();
     let mut buf = String::new();
-    if input.read_line(&mut buf).is_err() {
-        panic!("Failed to read input.");
+    let mut interpreter = Interpreter::default();
+
+    output.write_all(b"libPS 0.0.0")?;
+
+    loop {
+        output.write_all(b"\n>>> ")?;
+        output.flush()?;
+
+        input.read_line(&mut buf)?;
+
+        if buf.starts_with(".quit") {
+            break;
+        }
+
+        if let Err(e) = interpreter.evaluate(buf.chars().into()) {
+            fatal(&e.to_string());
+        }
+
+        output.write_all(b"|-")?;
+        interpreter.write_stack(&mut output)?;
+
+        buf.clear();
     }
 
-    if let Err(e) = eval(&buf) {
-        eprintln!("{}", e);
-        process::exit(1);
-    }
+    Ok(())
 }

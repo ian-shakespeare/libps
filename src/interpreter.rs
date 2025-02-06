@@ -1,756 +1,46 @@
-use std::{collections, f64::consts};
+use std::{collections::HashMap, io};
 
 use crate::{
-    object::{Access, Composite, Container, Object},
+    object::{Composite, Container, Object},
+    operators,
     rand::RandomNumberGenerator,
     Error, ErrorKind, Lexer,
 };
 
 #[allow(dead_code)]
-pub struct Interpreter<I: Iterator<Item = char>> {
-    arrays: Container<Composite<Vec<Object>>>,
-    execution_stack: Vec<Object>,
-    global_dict: collections::HashMap<String, Object>,
-    is_packing: bool,
-    lexer: Lexer<I>,
-    operand_stack: Vec<Object>,
-    rng: RandomNumberGenerator,
-    strings: Container<Composite<String>>,
-    user_dict: collections::HashMap<String, Object>,
+#[derive(Default)]
+pub struct InterpreterState {
+    pub arrays: Container<Composite<Vec<Object>>>,
+    pub execution_stack: Vec<Object>,
+    pub global_dict: HashMap<String, Object>,
+    pub is_packing: bool,
+    pub operand_stack: Vec<Object>,
+    pub rng: RandomNumberGenerator,
+    pub strings: Container<Composite<String>>,
+    pub user_dict: HashMap<String, Object>,
+    pub system_dict: HashMap<String, Object>,
 }
 
-impl<I> From<Lexer<I>> for Interpreter<I>
-where
-    I: Iterator<Item = char>,
-{
-    fn from(value: Lexer<I>) -> Self {
-        Self {
-            arrays: Container::default(),
-            execution_stack: Vec::new(),
-            global_dict: collections::HashMap::new(),
-            is_packing: false,
-            lexer: value,
-            operand_stack: Vec::new(),
-            rng: RandomNumberGenerator::default(),
-            strings: Container::default(),
-            user_dict: collections::HashMap::new(),
-        }
-    }
-}
-
-impl<I> Interpreter<I>
-where
-    I: Iterator<Item = char>,
-{
-    pub fn new(input: I) -> Self {
-        Self {
-            lexer: Lexer::from(input),
-            operand_stack: Vec::new(),
-            execution_stack: Vec::new(),
-            global_dict: collections::HashMap::new(),
-            is_packing: false,
-            user_dict: collections::HashMap::new(),
-            strings: Container::default(),
-            arrays: Container::default(),
-            rng: RandomNumberGenerator::default(),
-        }
-    }
-
-    pub fn evaluate(&mut self) -> crate::Result<()> {
-        while let Some(obj) = self.lexer.next_obj(&mut self.strings) {
-            self.execute_object(obj?)?;
-        }
-        Ok(())
-    }
-
-    fn execute_object(&mut self, obj: Object) -> crate::Result<()> {
-        match obj {
-            Object::Integer(_) | Object::Real(_) | Object::Boolean(_) | Object::String(_) => {
-                self.operand_stack.push(obj)
-            },
-            Object::Name(name) => {
-                if let Some(obj) = self.user_dict.get(&name) {
-                    return self.execute_object(obj.clone());
-                }
-
-                if let Some(obj) = self.global_dict.get(&name) {
-                    return self.execute_object(obj.clone());
-                }
-
-                // system_dict
-                match name.as_str() {
-                    "dup" => self.dup()?,
-                    "exch" => self.exch()?,
-                    "pop" => {
-                        self.pop()?;
-                    },
-                    "copy" => self.copy()?,
-                    "roll" => self.roll()?,
-                    "index" => self.index()?,
-                    "mark" => self.mark()?,
-                    "clear" => self.clear()?,
-                    "count" => self.count()?,
-                    "counttomark" => self.counttomark()?,
-                    "cleartomark" => self.cleartomark()?,
-                    "add" => self.arithmetic(i32::checked_add, |a: f64, b: f64| a + b)?,
-                    "div" => self.arithmetic(|_, _| None, |a: f64, b: f64| a / b)?,
-                    "idiv" => self.idiv()?,
-                    "imod" => self.imod()?,
-                    "mul" => self.arithmetic(i32::checked_mul, |a: f64, b: f64| a * b)?,
-                    "sub" => self.arithmetic(i32::checked_sub, |a: f64, b: f64| a - b)?,
-                    "abs" => self.num_unary(i32::checked_abs, f64::abs)?,
-                    "neg" => self.num_unary(i32::checked_neg, |a: f64| -1.0 * a)?,
-                    "ceiling" => self.num_unary(|a: i32| Some(a), f64::ceil)?,
-                    "floor" => self.num_unary(|a: i32| Some(a), f64::floor)?,
-                    "round" => self.num_unary(|a: i32| Some(a), f64::round)?,
-                    "truncate" => self.num_unary(|a: i32| Some(a), f64::trunc)?,
-                    "sqrt" => self.real_unary(f64::sqrt)?,
-                    "atan" => self.arithmetic(
-                        |_, _| None,
-                        |num: f64, den: f64| {
-                            positive_degrees(radians_to_degrees((num / den).atan()))
-                        },
-                    )?,
-                    "cos" => self.real_unary(|a: f64| degrees_to_radians(a).cos())?,
-                    "sin" => self.real_unary(|a: f64| degrees_to_radians(a).sin())?,
-                    "exp" => self.arithmetic(|_, _| None, |base: f64, exp: f64| base.powf(exp))?,
-                    "ln" => self.real_unary(f64::ln)?,
-                    "log" => self.real_unary(f64::log10)?,
-                    "rand" => self.rand()?,
-                    "srand" => self.srand()?,
-                    "rrand" => self.rrand()?,
-                    "array" => self.array()?,
-                    "[" => self.mark()?,
-                    "]" => self.endarray()?,
-                    "length" => self.length()?,
-                    "get" => self.get()?,
-                    "put" => self.put()?,
-                    "getinterval" => self.getinterval()?,
-                    "putinterval" => self.putinterval()?,
-                    "astore" => self.astore()?,
-                    "aload" => self.aload()?,
-                    "packedarray" => self.packedarray()?,
-                    "setpacking" => self.setpacking()?,
-                    "currentpacking" => self.currentpacking()?,
-                    _ => return Err(Error::new(ErrorKind::Undefined, name)),
-                }
-            },
-            _ => return Err(Error::new(ErrorKind::Unregistered, "not implemented")),
-        }
-
-        Ok(())
-    }
-}
-
-// Operators
-impl<I> Interpreter<I>
-where
-    I: Iterator<Item = char>,
-{
-    fn dup(&mut self) -> crate::Result<()> {
-        let obj = self.pop()?;
-
-        self.push(obj.clone());
-        self.push(obj);
-
-        Ok(())
-    }
-
-    fn exch(&mut self) -> crate::Result<()> {
-        let first = self.pop()?;
-        let second = self.pop()?;
-
-        self.push(first);
-        self.push(second);
-
-        Ok(())
-    }
-
-    fn copy(&mut self) -> crate::Result<()> {
-        let mut original_stack = Vec::new();
-        let mut copy_stack = Vec::new();
-
-        match self.pop()? {
-            Object::Integer(n) => {
-                for _ in 0..n {
-                    let obj = self.pop()?;
-                    copy_stack.push(obj.clone());
-                    original_stack.push(obj);
-                }
-
-                while let Some(obj) = original_stack.pop() {
-                    self.push(obj);
-                }
-
-                while let Some(obj) = copy_stack.pop() {
-                    self.push(obj);
-                }
-
-                Ok(())
-            },
-            Object::Array(dest_idx) => {
-                let obj = self.pop()?;
-
-                let source = match obj {
-                    Object::Array(idx) | Object::PackedArray(idx) => {
-                        let arr = self.arrays.get(idx)?;
-
-                        Ok(arr)
-                    },
-                    _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-                }?;
-
-                if source.is_exec_only() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                let source = source.inner.clone();
-
-                let destination = self.arrays.get_mut(dest_idx)?;
-
-                if destination.is_read_only() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                for (index, obj) in source.into_iter().enumerate() {
-                    match destination.inner.get_mut(index) {
-                        Some(dest_obj) => *dest_obj = obj,
-                        None => return Err(Error::from(ErrorKind::RangeCheck)),
-                    }
-                }
-
-                self.push(Object::Array(dest_idx));
-
-                Ok(())
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
-        }
-    }
-
-    fn roll(&mut self) -> crate::Result<()> {
-        let mut top_stack = Vec::new();
-        let mut bottom_stack = Vec::new();
-
-        let j = self.pop_int()?;
-        let n = self.pop_int()?;
-
-        let j = (n + j) % n;
-        for i in 0..n {
-            let obj = self.pop()?;
-            if i < j {
-                bottom_stack.push(obj);
-            } else {
-                top_stack.push(obj);
-            }
-        }
-
-        while let Some(obj) = bottom_stack.pop() {
-            self.push(obj);
-        }
-
-        while let Some(obj) = top_stack.pop() {
-            self.push(obj);
-        }
-
-        Ok(())
-    }
-
-    fn index(&mut self) -> crate::Result<()> {
-        let idx = self.pop_usize()?;
-
-        if self.operand_stack.is_empty() {
-            return Err(Error::from(ErrorKind::RangeCheck));
-        }
-
-        let Some(idx) = (self.operand_stack.len() - 1).checked_sub(idx) else {
-            return Err(Error::from(ErrorKind::RangeCheck));
-        };
-
-        match self.operand_stack.get(idx) {
-            Some(obj) => {
-                self.push(obj.clone());
-                Ok(())
-            },
-            None => Err(Error::from(ErrorKind::RangeCheck)),
-        }
-    }
-
-    fn mark(&mut self) -> crate::Result<()> {
-        self.push(Object::Mark);
-
-        Ok(())
-    }
-
-    fn clear(&mut self) -> crate::Result<()> {
-        self.operand_stack.clear();
-
-        Ok(())
-    }
-
-    fn count(&mut self) -> crate::Result<()> {
-        let i = usize_to_i32(self.operand_stack.len())?;
-
-        self.push(Object::Integer(i));
-
-        Ok(())
-    }
-
-    fn counttomark(&mut self) -> crate::Result<()> {
-        let Some((u, _)) = self
-            .operand_stack
-            .iter()
-            .rev()
-            .enumerate()
-            .find(|(_, obj)| matches!(obj, Object::Mark))
-        else {
-            return Err(Error::from(ErrorKind::UnmatchedMark));
-        };
-
-        let i = usize_to_i32(u)?;
-
-        self.push(Object::Integer(i));
-
-        Ok(())
-    }
-
-    fn cleartomark(&mut self) -> crate::Result<()> {
-        loop {
-            match self.pop() {
-                Err(_) => return Err(Error::from(ErrorKind::UnmatchedMark)),
-                Ok(obj) => {
-                    if matches!(obj, Object::Mark) {
-                        break;
-                    }
-                },
-            }
-        }
-
-        Ok(())
-    }
-
-    fn arithmetic(
-        &mut self,
-        checked: impl Fn(i32, i32) -> Option<i32>,
-        real: impl Fn(f64, f64) -> f64,
-    ) -> crate::Result<()> {
-        let rhs = self.pop()?;
-        let lhs = self.pop()?;
-
-        if lhs.is_int() && rhs.is_int() {
-            let lhs = lhs.into_int()?;
-            let rhs = rhs.into_int()?;
-
-            let obj = match checked(lhs, rhs) {
-                Some(total) => Object::Integer(total),
-                None => {
-                    let total = real(f64::from(lhs), f64::from(rhs));
-                    if !is_valid_real(total) {
-                        return Err(Error::from(ErrorKind::UndefinedResult));
-                    }
-
-                    Object::Real(total)
-                },
-            };
-
-            self.push(obj);
-
-            return Ok(());
-        }
-
-        let total = real(lhs.into_real()?, rhs.into_real()?);
-
-        if !is_valid_real(total) {
-            return Err(Error::from(ErrorKind::UndefinedResult));
-        }
-
-        self.push(Object::Real(total));
-
-        Ok(())
-    }
-
-    fn num_unary(
-        &mut self,
-        int: impl Fn(i32) -> Option<i32>,
-        real: impl Fn(f64) -> f64,
-    ) -> crate::Result<()> {
-        let n = self.pop()?;
-
-        if n.is_int() {
-            let obj = match int(n.into_int()?) {
-                Some(total) => Object::Integer(total),
-                None => Object::Real(real(n.into_real()?)),
-            };
-
-            self.push(obj);
-
-            return Ok(());
-        }
-
-        self.push(Object::Real(real(n.into_real()?)));
-
-        Ok(())
-    }
-
-    fn real_unary(&mut self, unary: impl Fn(f64) -> f64) -> crate::Result<()> {
-        let n = self.pop_real()?;
-
-        let total = unary(n);
-
-        if !is_valid_real(total) {
-            return Err(Error::from(ErrorKind::UndefinedResult));
-        }
-
-        self.push(Object::Real(total));
-
-        Ok(())
-    }
-
-    fn idiv(&mut self) -> crate::Result<()> {
-        let rhs = self.pop_int()?;
-        let lhs = self.pop_int()?;
-
-        let total = match lhs.checked_div(rhs) {
-            Some(total) => Ok(total),
-            None => Err(Error::from(ErrorKind::UndefinedResult)),
-        }?;
-
-        self.push(Object::Integer(total));
-
-        Ok(())
-    }
-
-    fn imod(&mut self) -> crate::Result<()> {
-        let rhs = self.pop_int()?;
-        let lhs = self.pop_int()?;
-
-        let total = match lhs.checked_rem(rhs) {
-            Some(total) => Ok(total),
-            None => Err(Error::from(ErrorKind::UndefinedResult)),
-        }?;
-
-        self.push(Object::Integer(total));
-
-        Ok(())
-    }
-
-    fn rand(&mut self) -> crate::Result<()> {
-        let n = self.rng.rand().abs();
-
-        self.push(Object::Integer(n));
-
-        Ok(())
-    }
-
-    fn srand(&mut self) -> crate::Result<()> {
-        let seed = self.pop_int()?;
-
-        self.rng.set_seed(seed);
-
-        Ok(())
-    }
-
-    fn rrand(&mut self) -> crate::Result<()> {
-        let seed = self.rng.seed();
-
-        self.push(Object::Integer(seed));
-
-        Ok(())
-    }
-
-    fn array(&mut self) -> crate::Result<()> {
-        let len = self.pop_usize()?;
-
-        let inner = vec![Object::Null; len];
-        let composite = Composite {
-            access: Access::default(),
-            len,
-            inner,
-        };
-
-        let idx = self.arrays.insert(composite);
-        self.push(Object::Array(idx));
-
-        Ok(())
-    }
-
-    fn endarray(&mut self) -> crate::Result<()> {
-        let mut arr = Vec::new();
-
-        loop {
-            match self.pop() {
-                Err(_) => return Err(Error::from(ErrorKind::UnmatchedMark)),
-                Ok(obj) => {
-                    if matches!(obj, Object::Mark) {
-                        break;
-                    }
-
-                    arr.push(obj);
-                },
-            }
-        }
-
-        arr.reverse();
-
-        let len = arr.len();
-        let composite = Composite {
-            access: Access::default(),
-            inner: arr,
-            len,
-        };
-
-        let idx = self.arrays.insert(composite);
-        self.push(Object::Array(idx));
-
-        Ok(())
-    }
-
-    fn length(&mut self) -> crate::Result<()> {
-        let obj = self.pop()?;
-
-        let len = match obj {
-            Object::Array(idx) | Object::PackedArray(idx) => {
-                let arr = self.arrays.get(idx)?;
-
-                if !arr.is_readable() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                Ok(arr.len)
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-        }?;
-
-        let i = usize_to_i32(len)?;
-        self.push(Object::Integer(i));
-
-        Ok(())
-    }
-
-    fn get(&mut self) -> crate::Result<()> {
-        let index = self.pop_usize()?;
-        let obj = self.pop()?;
-
-        let obj = match obj {
-            Object::Array(idx) | Object::PackedArray(idx) => {
-                let arr = self.arrays.get(idx)?;
-
-                if arr.is_exec_only() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                match arr.inner.get(index) {
-                    Some(obj) => Ok(obj.clone()),
-                    None => Err(Error::from(ErrorKind::RangeCheck)),
-                }
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-        }?;
-
-        self.push(obj);
-
-        Ok(())
-    }
-
-    fn put(&mut self) -> crate::Result<()> {
-        let value = self.pop()?;
-        let index = self.pop_usize()?;
-        let arr = self.pop_array_mut()?;
-
-        if !arr.is_writeable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
-
-        let Some(obj) = arr.inner.get_mut(index) else {
-            return Err(Error::from(ErrorKind::RangeCheck));
-        };
-
-        *obj = value;
-
-        Ok(())
-    }
-
-    fn getinterval(&mut self) -> crate::Result<()> {
-        let count = self.pop_usize()?;
-        let index = self.pop_usize()?;
-        let obj = self.pop()?;
-
-        let arr = match obj {
-            Object::Array(idx) | Object::PackedArray(idx) => {
-                let arr = self.arrays.get(idx)?;
-
-                if !arr.is_readable() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                Ok(arr.inner.clone())
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-        }?;
-
-        if index >= arr.len() {
-            return Err(Error::from(ErrorKind::RangeCheck));
-        }
-
-        let mut subarr = Vec::with_capacity(count);
-
-        for i in index..(index + count) {
-            let obj = arr.get(i).ok_or(Error::from(ErrorKind::RangeCheck))?;
-
-            subarr.push(obj.clone());
-        }
-
-        let composite = Composite {
-            access: Access::default(),
-            inner: subarr,
-            len: count,
-        };
-
-        let idx = self.arrays.insert(composite);
-        self.push(Object::Array(idx));
-
-        Ok(())
-    }
-
-    fn putinterval(&mut self) -> crate::Result<()> {
-        let source = self.pop_array()?;
-
-        if !source.is_readable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
-
-        let source = source.inner.clone();
-
-        let index = self.pop_usize()?;
-        let destination = self.pop_array_mut()?;
-
-        if !destination.is_writeable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
-
-        for (offset, obj) in source.into_iter().enumerate() {
-            let Some(dest_obj) = destination.inner.get_mut(index + offset) else {
-                return Err(Error::from(ErrorKind::RangeCheck));
-            };
-
-            *dest_obj = obj;
-        }
-
-        Ok(())
-    }
-
-    fn astore(&mut self) -> crate::Result<()> {
-        let Object::Array(arr_idx) = self.pop()? else {
-            return Err(Error::new(ErrorKind::TypeCheck, "expected array"));
-        };
-
-        let len = match self.arrays.get(arr_idx) {
-            Ok(composite) => {
-                if !composite.is_writeable() {
-                    Err(Error::from(ErrorKind::InvalidAccess))
-                } else {
-                    Ok(composite.len)
-                }
-            },
-            Err(_) => Err(Error::from(ErrorKind::Undefined)),
-        }?;
-
-        let mut stored = vec![Object::Null; len];
-
-        for i in (0..len).rev() {
-            stored[i] = self.pop()?;
-        }
-
-        match self.arrays.get_mut(arr_idx) {
-            Ok(composite) => {
-                composite.inner = stored;
-                Ok(())
-            },
-            Err(_) => Err(Error::from(ErrorKind::Undefined)),
-        }
-    }
-
-    fn aload(&mut self) -> crate::Result<()> {
-        let obj = self.pop()?;
-
-        let (idx, arr) = match obj {
-            Object::Array(idx) | Object::PackedArray(idx) => {
-                let arr = self.arrays.get(idx)?;
-
-                if !arr.is_readable() {
-                    return Err(Error::from(ErrorKind::InvalidAccess));
-                }
-
-                Ok((idx, arr.inner.clone()))
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-        }?;
-
-        for obj in arr {
-            self.push(obj);
-        }
-
-        self.push(Object::Array(idx));
-
-        Ok(())
-    }
-
-    fn packedarray(&mut self) -> crate::Result<()> {
-        let len = self.pop_usize()?;
-
-        let inner = vec![Object::Null; len];
-
-        let composite = Composite {
-            access: Access::ReadOnly,
-            len,
-            inner,
-        };
-
-        let index = self.arrays.insert(composite);
-
-        self.push(Object::PackedArray(index));
-
-        Ok(())
-    }
-
-    fn setpacking(&mut self) -> crate::Result<()> {
-        let b = self.pop_bool()?;
-
-        self.is_packing = b;
-
-        Ok(())
-    }
-
-    fn currentpacking(&mut self) -> crate::Result<()> {
-        self.push(Object::Boolean(self.is_packing));
-
-        Ok(())
-    }
-}
-
-// Utils
-impl<I> Interpreter<I>
-where
-    I: Iterator<Item = char>,
-{
-    fn push(&mut self, obj: Object) {
+impl InterpreterState {
+    pub fn push(&mut self, obj: Object) {
         self.operand_stack.push(obj);
     }
 
-    fn pop(&mut self) -> crate::Result<Object> {
+    pub fn pop(&mut self) -> crate::Result<Object> {
         match self.operand_stack.pop() {
             Some(obj) => Ok(obj),
             None => Err(Error::from(ErrorKind::StackUnderflow)),
         }
     }
 
-    fn pop_int(&mut self) -> crate::Result<i32> {
+    pub fn pop_int(&mut self) -> crate::Result<i32> {
         match self.pop()? {
             Object::Integer(i) => Ok(i),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
         }
     }
 
-    fn pop_real(&mut self) -> crate::Result<f64> {
+    pub fn pop_real(&mut self) -> crate::Result<f64> {
         match self.pop()? {
             Object::Integer(i) => Ok(f64::from(i)),
             Object::Real(r) => Ok(r),
@@ -758,7 +48,7 @@ where
         }
     }
 
-    fn pop_usize(&mut self) -> crate::Result<usize> {
+    pub fn pop_usize(&mut self) -> crate::Result<usize> {
         let i = self.pop_int()?;
 
         match i.try_into() {
@@ -767,58 +57,268 @@ where
         }
     }
 
-    fn pop_array(&mut self) -> crate::Result<&Composite<Vec<Object>>> {
+    pub fn pop_array(&mut self) -> crate::Result<&Composite<Vec<Object>>> {
         match self.pop()? {
             Object::Array(idx) => Ok(self.arrays.get(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
 
-    fn pop_array_mut(&mut self) -> crate::Result<&mut Composite<Vec<Object>>> {
+    pub fn pop_array_mut(&mut self) -> crate::Result<&mut Composite<Vec<Object>>> {
         match self.pop()? {
             Object::Array(idx) => Ok(self.arrays.get_mut(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
 
-    fn pop_bool(&mut self) -> crate::Result<bool> {
+    pub fn pop_bool(&mut self) -> crate::Result<bool> {
         match self.pop()? {
             Object::Boolean(b) => Ok(b),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected boolean")),
         }
     }
-}
 
-fn radians_to_degrees(radians: f64) -> f64 {
-    radians * (180.0 / consts::PI)
-}
+    pub fn load_operators(&mut self) {
+        let ops = [
+            ("dup", Object::Operator(operators::dup)),
+            ("exch", Object::Operator(operators::exch)),
+            (
+                "pop",
+                Object::Operator(|state| {
+                    state.pop()?;
+                    Ok(())
+                }),
+            ),
+            ("copy", Object::Operator(operators::copy)),
+            ("roll", Object::Operator(operators::roll)),
+            ("index", Object::Operator(operators::index)),
+            ("mark", Object::Operator(operators::mark)),
+            ("clear", Object::Operator(operators::clear)),
+            ("count", Object::Operator(operators::count)),
+            ("counttomark", Object::Operator(operators::counttomark)),
+            ("cleartomark", Object::Operator(operators::cleartomark)),
+            (
+                "add",
+                Object::Operator(|state| {
+                    operators::arithmetic(state, i32::checked_add, |a: f64, b: f64| a + b)
+                }),
+            ),
+            (
+                "div",
+                Object::Operator(|state| {
+                    operators::arithmetic(state, |_, _| None, |a: f64, b: f64| a / b)
+                }),
+            ),
+            ("idiv", Object::Operator(operators::idiv)),
+            ("imod", Object::Operator(operators::imod)),
+            (
+                "mul",
+                Object::Operator(|state| {
+                    operators::arithmetic(state, i32::checked_mul, |a: f64, b: f64| a * b)
+                }),
+            ),
+            (
+                "sub",
+                Object::Operator(|state| {
+                    operators::arithmetic(state, i32::checked_sub, |a: f64, b: f64| a - b)
+                }),
+            ),
+            (
+                "abs",
+                Object::Operator(|state| operators::num_unary(state, i32::checked_abs, f64::abs)),
+            ),
+            (
+                "neg",
+                Object::Operator(|state| {
+                    operators::num_unary(state, i32::checked_neg, |a: f64| -1.0 * a)
+                }),
+            ),
+            (
+                "ceiling",
+                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::ceil)),
+            ),
+            (
+                "floor",
+                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::floor)),
+            ),
+            (
+                "round",
+                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::round)),
+            ),
+            (
+                "truncate",
+                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::trunc)),
+            ),
+            (
+                "sqrt",
+                Object::Operator(|state| operators::real_unary(state, f64::sqrt)),
+            ),
+            ("atan", Object::Operator(operators::atan)),
+            ("cos", Object::Operator(operators::cos)),
+            ("sin", Object::Operator(operators::sin)),
+            (
+                "exp",
+                Object::Operator(|state| {
+                    operators::arithmetic(state, |_, _| None, |base: f64, exp: f64| base.powf(exp))
+                }),
+            ),
+            (
+                "ln",
+                Object::Operator(|state| operators::real_unary(state, f64::ln)),
+            ),
+            (
+                "log",
+                Object::Operator(|state| operators::real_unary(state, f64::log10)),
+            ),
+            ("rand", Object::Operator(operators::rand)),
+            ("srand", Object::Operator(operators::srand)),
+            ("rrand", Object::Operator(operators::rrand)),
+            ("array", Object::Operator(operators::array)),
+            ("[", Object::Operator(operators::mark)),
+            ("]", Object::Operator(operators::endarray)),
+            ("length", Object::Operator(operators::length)),
+            ("get", Object::Operator(operators::get)),
+            ("put", Object::Operator(operators::put)),
+            ("getinterval", Object::Operator(operators::getinterval)),
+            ("putinterval", Object::Operator(operators::putinterval)),
+            ("astore", Object::Operator(operators::astore)),
+            ("aload", Object::Operator(operators::aload)),
+            ("packedarray", Object::Operator(operators::packedarray)),
+            ("setpacking", Object::Operator(operators::setpacking)),
+            (
+                "currentpacking",
+                Object::Operator(operators::currentpacking),
+            ),
+        ];
 
-fn degrees_to_radians(degrees: f64) -> f64 {
-    (degrees * consts::PI) / 180.0
-}
-
-fn positive_degrees(degrees: f64) -> f64 {
-    if degrees < 0.0 {
-        360.0 + degrees
-    } else {
-        degrees
+        for (key, op) in ops {
+            self.system_dict.insert(key.to_string(), op);
+        }
     }
 }
 
-fn usize_to_i32(u: usize) -> crate::Result<i32> {
-    let i: i32 = match u.try_into() {
-        Ok(i) => Ok(i),
-        Err(_) => Err(Error::new(
-            ErrorKind::Unregistered,
-            "failed to convert usize to int",
-        )),
-    }?;
-
-    Ok(i)
+pub struct Interpreter {
+    state: InterpreterState,
 }
 
-fn is_valid_real(n: f64) -> bool {
-    n.is_finite() && !n.is_nan()
+impl Default for Interpreter {
+    fn default() -> Self {
+        let mut state = InterpreterState::default();
+        state.load_operators();
+
+        Self { state }
+    }
+}
+
+impl Interpreter {
+    pub fn evaluate<I>(&mut self, mut lexer: Lexer<I>) -> crate::Result<()>
+    where
+        I: Iterator<Item = char>,
+    {
+        while let Some(obj) = lexer.next_obj(&mut self.state.strings) {
+            self.execute_object(obj?)?;
+        }
+        Ok(())
+    }
+
+    fn execute_object(&mut self, obj: Object) -> crate::Result<()> {
+        match obj {
+            Object::Integer(_)
+            | Object::Real(_)
+            | Object::Boolean(_)
+            | Object::String(_)
+            | Object::Literal(_) => {
+                self.state.push(obj);
+                Ok(())
+            },
+            Object::Name(name) => {
+                if let Some(obj) = self.state.user_dict.get(&name) {
+                    return self.execute_object(obj.clone());
+                }
+
+                if let Some(obj) = self.state.global_dict.get(&name) {
+                    return self.execute_object(obj.clone());
+                }
+
+                if let Some(Object::Operator(op)) = self.state.system_dict.get(&name) {
+                    return op(&mut self.state);
+                }
+
+                Err(Error::new(ErrorKind::Undefined, name))
+            },
+            _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
+        }
+    }
+
+    pub fn write_stack(&self, writer: &mut impl io::Write) -> io::Result<usize> {
+        let mut count = 0;
+
+        for obj in &self.state.operand_stack {
+            count += writer.write(b" ")?;
+            count += self.write_object(writer, obj)?;
+        }
+
+        Ok(count)
+    }
+
+    fn write_object(&self, writer: &mut impl io::Write, obj: &Object) -> io::Result<usize> {
+        match obj {
+            Object::Integer(i) => writer.write(i.to_string().as_bytes()),
+            Object::Real(r) => {
+                let is_whole_number = r.fract() == 0.0;
+                if is_whole_number {
+                    writer.write(format!("{:.1}", r).as_bytes())
+                } else {
+                    writer.write(r.to_string().as_bytes())
+                }
+            },
+            Object::Boolean(b) => writer.write(b.to_string().as_bytes()),
+            Object::String(idx) => {
+                let string = format!(
+                    "({})",
+                    self.state
+                        .strings
+                        .get(*idx)
+                        .or(Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            "missing string",
+                        )))?
+                        .inner
+                        .clone()
+                );
+                let output = string.as_bytes();
+
+                writer.write(output)
+            },
+            Object::Array(idx) | Object::PackedArray(idx) => {
+                let mut count = writer.write(b"[")?;
+
+                let arr = self
+                    .state
+                    .arrays
+                    .get(*idx)
+                    .or(Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "missing array",
+                    )))?
+                    .inner
+                    .clone();
+
+                for obj in &arr {
+                    count += writer.write(b" ")?;
+                    count += self.write_object(writer, obj)?;
+                }
+
+                count += writer.write(b" ]")?;
+
+                Ok(count)
+            },
+            Object::Name(name) | Object::Literal(name) => writer.write(name.as_bytes()),
+            Object::Mark => writer.write(b"mark"),
+            Object::Null => writer.write(b"null"),
+            _ => Ok(0),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -831,25 +331,35 @@ mod tests {
 
     #[test]
     fn test_dup() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 dup".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 dup".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(2, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
+        assert_eq!(2, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_exch() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 exch".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 exch".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
@@ -859,9 +369,8 @@ mod tests {
         let cases = ["1 exch", "exch"];
 
         for input in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-
-            let result = interpreter.evaluate();
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -870,63 +379,79 @@ mod tests {
 
     #[test]
     fn test_pop() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 pop".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 pop".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_pop_underflow() {
-        let mut interpreter = Interpreter::new("pop".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("pop".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_copy_simple() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 3 2 copy".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 3 2 copy".chars().into())?;
 
         // Stack should be: 3 2 3 2 1 |
-        assert_eq!(5, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
+        assert_eq!(5, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(3)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(3)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_copy_simple_underflow() {
-        let mut interpreter = Interpreter::new("copy".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("copy".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_copy_composite() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[ 1 2 3 ] [ 4 5 6 ] copy".chars());
-
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[ 1 2 3 ] [ 4 5 6 ] copy".chars().into())?;
 
         // Stack should be: [ 1 2 3 ] |
-        assert_eq!(1, interpreter.operand_stack.len());
-        let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        let Some(Object::Array(arr_idx)) = interpreter.state.operand_stack.pop() else {
             return Err("expected array object".into());
         };
 
-        let arr = interpreter.arrays.get(arr_idx)?;
+        let arr = interpreter.state.arrays.get(arr_idx)?;
 
         assert_eq!(Some(Object::Integer(1)), arr.inner.get(0).cloned());
         assert_eq!(Some(Object::Integer(2)), arr.inner.get(1).cloned());
@@ -937,57 +462,75 @@ mod tests {
 
     #[test]
     fn test_copy_composite_rangecheck() {
-        let mut interpreter = Interpreter::new("[ 1 2 3 ] [ 4 5 ] copy".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("[ 1 2 3 ] [ 4 5 ] copy".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_copy_composite_typecheck() {
-        let mut interpreter = Interpreter::new("1 [ 1 2 3 ] copy".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 [ 1 2 3 ] copy".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_copy_composite_underflow() {
-        let mut interpreter = Interpreter::new("[ 1 2 3 ] copy".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("[ 1 2 3 ] copy".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_roll() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 3 3 1 roll".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 3 3 1 roll".chars().into())?;
 
-        assert_eq!(3, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
+        assert_eq!(3, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(3)),
+            interpreter.state.operand_stack.pop()
+        );
 
-        let mut interpreter = Interpreter::new("1 2 3 3 -1 roll".chars());
-        interpreter.evaluate()?;
+        interpreter.state.operand_stack.clear();
+        interpreter.evaluate("1 2 3 3 -1 roll".chars().into())?;
 
-        assert_eq!(3, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
+        assert_eq!(3, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(3)),
+            interpreter.state.operand_stack.pop()
+        );
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_roll_underflow() {
-        let mut interpreter = Interpreter::new("roll".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("roll".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
@@ -1001,13 +544,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
             assert_eq!(
                 Some(Object::Integer(expect)),
-                interpreter.operand_stack.pop()
+                interpreter.state.operand_stack.pop()
             );
         }
 
@@ -1016,30 +558,29 @@ mod tests {
 
     #[test]
     fn test_index_rangecheck() {
-        let mut interpreter = Interpreter::new("1 2 3 4 index".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 2 3 4 index".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_index_underflow() {
-        let mut interpreter = Interpreter::new("index".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("index".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_mark() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("mark".chars());
-
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("mark".chars().into())?;
 
         assert!(matches!(
-            interpreter.operand_stack.pop(),
+            interpreter.state.operand_stack.pop(),
             Some(Object::Mark)
         ));
 
@@ -1048,11 +589,10 @@ mod tests {
 
     #[test]
     fn test_clear() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 3 clear".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 3 clear".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(0, interpreter.operand_stack.len());
+        assert_eq!(0, interpreter.state.operand_stack.len());
 
         Ok(())
     }
@@ -1062,13 +602,12 @@ mod tests {
         let cases = [("count", 0), ("1 2 3 count", 3)];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
             assert_eq!(
                 Some(Object::Integer(expect)),
-                interpreter.operand_stack.pop()
+                interpreter.state.operand_stack.pop()
             );
         }
 
@@ -1077,32 +616,36 @@ mod tests {
 
     #[test]
     fn test_counttomark() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 mark 2 3 counttomark".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 mark 2 3 counttomark".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
+        assert_eq!(
+            Some(Object::Integer(2)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
 
     #[test]
     fn test_counttomark_unmatchedmark() {
-        let mut interpreter = Interpreter::new("1 2 3 counttomark 3".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 2 3 counttomark 3".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::UnmatchedMark, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_cleartomark() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 mark 2 3 cleartomark".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 mark 2 3 cleartomark".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert_eq!(
+            Some(Object::Integer(1)),
+            interpreter.state.operand_stack.pop()
+        );
 
         Ok(())
     }
@@ -1118,12 +661,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1134,9 +676,9 @@ mod tests {
         let cases = ["(string) 1.2e7 add", "1.2e7 (string) add"];
 
         for input in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
@@ -1147,9 +689,9 @@ mod tests {
         let cases = ["1 add", "add"];
 
         for input in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -1165,12 +707,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            let Some(Object::Real(value)) = interpreter.operand_stack.pop() else {
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            let Some(Object::Real(value)) = interpreter.state.operand_stack.pop() else {
                 return Err("expected real object".into());
             };
             assert!((value - expect).abs() < ERROR_MARGIN);
@@ -1184,9 +725,9 @@ mod tests {
         let cases = ["1 0 div", "1 0.0 div"];
 
         for input in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
         }
@@ -1197,14 +738,13 @@ mod tests {
         let cases = [("1 2 idiv", 0), ("10 3 idiv", 3), ("5 2 idiv", 2)];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
             assert_eq!(
                 Some(Object::Integer(expect)),
-                interpreter.operand_stack.pop()
+                interpreter.state.operand_stack.pop()
             );
         }
 
@@ -1213,9 +753,9 @@ mod tests {
 
     #[test]
     fn test_idiv_undefinedresult() {
-        let mut interpreter = Interpreter::new("1 0 idiv".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 0 idiv".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
     }
@@ -1225,14 +765,13 @@ mod tests {
         let cases = [("13 2 imod", 1), ("16 3 imod", 1)];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
             assert_eq!(
                 Some(Object::Integer(expect)),
-                interpreter.operand_stack.pop()
+                interpreter.state.operand_stack.pop()
             );
         }
 
@@ -1241,9 +780,9 @@ mod tests {
 
     #[test]
     fn test_imod_undefinedresult() {
-        let mut interpreter = Interpreter::new("2 0 imod".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("2 0 imod".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
     }
@@ -1259,12 +798,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1281,11 +819,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1303,11 +841,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1323,11 +861,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1352,12 +890,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1382,12 +919,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1413,12 +949,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1443,11 +978,11 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(expect), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(Some(expect), interpreter.state.operand_stack.pop());
         }
 
         Ok(())
@@ -1465,12 +1000,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
@@ -1491,11 +1026,14 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert_eq!(Some(Object::Real(expect)), interpreter.operand_stack.pop());
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert_eq!(
+                Some(Object::Real(expect)),
+                interpreter.state.operand_stack.pop()
+            );
         }
 
         Ok(())
@@ -1511,12 +1049,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
@@ -1533,12 +1071,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
@@ -1561,12 +1099,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect) < ERROR_MARGIN);
         }
 
@@ -1583,12 +1121,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
@@ -1605,12 +1143,12 @@ mod tests {
         ];
 
         for (input, expect) in cases {
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
+            assert_eq!(1, interpreter.state.operand_stack.len());
 
-            let received = interpreter.pop_real()?;
+            let received = interpreter.state.pop_real()?;
             assert!((received - expect).abs() < ERROR_MARGIN);
         }
 
@@ -1620,11 +1158,11 @@ mod tests {
     #[test]
     fn test_rand() -> Result<(), Box<dyn error::Error>> {
         for _ in 0..5 {
-            let mut interpreter = Interpreter::new("rand".chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate("rand".chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            assert!(interpreter.pop_int()? >= 0);
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            assert!(interpreter.state.pop_int()? >= 0);
         }
 
         Ok(())
@@ -1632,18 +1170,18 @@ mod tests {
 
     #[test]
     fn test_srand() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("100 srand rand".chars());
-        interpreter.evaluate()?;
-        let initial_value = interpreter.pop_int()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("100 srand rand".chars().into())?;
+        let initial_value = interpreter.state.pop_int()?;
 
-        let mut interpreter = Interpreter::new("1 srand rand".chars());
-        interpreter.evaluate()?;
-        let intermediate_value = interpreter.pop_int()?;
+        interpreter.state.operand_stack.clear();
+        interpreter.evaluate("1 srand rand".chars().into())?;
+        let intermediate_value = interpreter.state.pop_int()?;
         assert_ne!(initial_value, intermediate_value);
 
-        let mut interpreter = Interpreter::new("100 srand rand".chars());
-        interpreter.evaluate()?;
-        let end_value = interpreter.pop_int()?;
+        interpreter.state.operand_stack.clear();
+        interpreter.evaluate("100 srand rand".chars().into())?;
+        let end_value = interpreter.state.pop_int()?;
         assert_eq!(initial_value, end_value);
 
         Ok(())
@@ -1651,10 +1189,10 @@ mod tests {
 
     #[test]
     fn test_rrand() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 srand rrand".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 srand rrand".chars().into())?;
 
-        assert_eq!(1, interpreter.pop_int()?);
+        assert_eq!(1, interpreter.state.pop_int()?);
 
         Ok(())
     }
@@ -1663,16 +1201,15 @@ mod tests {
     fn test_array() -> Result<(), Box<dyn error::Error>> {
         for num in 0..5 {
             let input = format!("{num} array");
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            let Some(Object::Array(arr_idx)) = interpreter.state.operand_stack.pop() else {
                 return Err("expected array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
+            let arr = interpreter.state.arrays.get(arr_idx)?;
             assert_eq!(num, arr.inner.len());
             assert!(arr.inner.iter().all(|obj| matches!(obj, Object::Null)));
         }
@@ -1682,39 +1219,43 @@ mod tests {
 
     #[test]
     fn test_array_rangecheck() {
-        let mut interpreter = Interpreter::new("-1 array".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("-1 array".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind())
     }
 
     #[test]
     fn test_array_typeheck() {
-        let mut interpreter = Interpreter::new("(str) array".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("(str) array".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind())
     }
 
     #[test]
     fn test_array_underflow() {
-        let mut interpreter = Interpreter::new("array".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("array".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind())
     }
 
     #[test]
     fn test_startarray() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[".chars().into())?;
 
-        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(1, interpreter.state.operand_stack.len());
 
-        let obj = interpreter.operand_stack.pop().ok_or("expected object")?;
+        let obj = interpreter
+            .state
+            .operand_stack
+            .pop()
+            .ok_or("expected object")?;
         assert!(matches!(obj, Object::Mark));
 
         Ok(())
@@ -1725,15 +1266,15 @@ mod tests {
         for length in 0..5 {
             let input = "[ ".to_string() + &format!("0 ").repeat(length) + "]";
 
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            assert_eq!(1, interpreter.operand_stack.len());
-            let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            let Some(Object::Array(arr_idx)) = interpreter.state.operand_stack.pop() else {
                 return Err("expected array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
+            let arr = interpreter.state.arrays.get(arr_idx)?;
             assert_eq!(length, arr.inner.len());
             assert!(arr
                 .inner
@@ -1746,31 +1287,31 @@ mod tests {
 
     #[test]
     fn test_endarray_unmatchedmark() {
-        let mut interpreter = Interpreter::new("]".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("]".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::UnmatchedMark, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_length() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[ 1 2 3 4 5 ] length".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[ 1 2 3 4 5 ] length".chars().into())?;
 
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert_eq!(5, interpreter.pop_int()?);
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert_eq!(5, interpreter.state.pop_int()?);
 
         Ok(())
     }
 
     #[test]
     fn test_length_packedarray() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("5 packedarray length".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("5 packedarray length".chars().into())?;
 
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert_eq!(5, interpreter.pop_int()?);
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert_eq!(5, interpreter.state.pop_int()?);
 
         Ok(())
     }
@@ -1779,10 +1320,10 @@ mod tests {
     fn test_get() -> Result<(), Box<dyn error::Error>> {
         for i in 0..5 {
             let input = format!("[ 1 2 3 4 5 ] {i} get");
-            let mut interpreter = Interpreter::new(input.chars());
-            interpreter.evaluate()?;
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            let received = interpreter.pop_int()?;
+            let received = interpreter.state.pop_int()?;
 
             assert_eq!(i + 1, received);
         }
@@ -1792,11 +1333,11 @@ mod tests {
 
     #[test]
     fn test_get_packedarray() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 packedarray 0 get".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 packedarray 0 get".chars().into())?;
 
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert!(matches!(interpreter.pop()?, Object::Null));
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert!(matches!(interpreter.state.pop()?, Object::Null));
 
         Ok(())
     }
@@ -1806,9 +1347,9 @@ mod tests {
         let inputs = ["[ 1 2 3 ] -1 get", "[ 1 2 3 ] 3 get", "[ ] 0 get"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
         }
@@ -1819,9 +1360,9 @@ mod tests {
         let inputs = ["[ 1 2 3 ] (str) get", "1 3 get"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
@@ -1832,9 +1373,9 @@ mod tests {
         let inputs = ["0 get", "get"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -1844,12 +1385,12 @@ mod tests {
     fn test_put() -> Result<(), Box<dyn error::Error>> {
         for i in 0..5 {
             let input = format!("5 array {i} 3.14 put");
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-            assert_eq!(0, interpreter.operand_stack.len());
+            assert_eq!(0, interpreter.state.operand_stack.len());
 
-            let arr = interpreter.arrays.get(1)?;
+            let arr = interpreter.state.arrays.get(1)?;
             assert_eq!(Some(Object::Real(3.14)), arr.inner.get(i).cloned());
         }
 
@@ -1865,9 +1406,9 @@ mod tests {
         ];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
         }
@@ -1878,9 +1419,9 @@ mod tests {
         let inputs = ["[ 1 2 3 ] (str) 3.14 put", "0 3 3.14 put"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
@@ -1891,9 +1432,9 @@ mod tests {
         let inputs = ["0 3.14 put", "3.14 put", "put"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -1901,13 +1442,12 @@ mod tests {
 
     #[test]
     fn test_getinterval() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[ 1 2 3 4 5 ] 1 3 getinterval".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[ 1 2 3 4 5 ] 1 3 getinterval".chars().into())?;
 
-        interpreter.evaluate()?;
+        assert_eq!(1, interpreter.state.operand_stack.len());
 
-        assert_eq!(1, interpreter.operand_stack.len());
-
-        let arr = interpreter.pop_array()?;
+        let arr = interpreter.state.pop_array()?;
         assert_eq!(
             vec![Object::Integer(2), Object::Integer(3), Object::Integer(4)],
             arr.inner
@@ -1926,9 +1466,9 @@ mod tests {
         ];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
         }
@@ -1943,9 +1483,9 @@ mod tests {
         ];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
@@ -1956,9 +1496,9 @@ mod tests {
         let inputs = ["0 1 getinterval", "1 getinterval", "getinterval"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -1966,11 +1506,10 @@ mod tests {
 
     #[test]
     fn test_putinterval() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[ 1 2 3 4 5 ] 1 [ 6 7 8 ] putinterval".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[ 1 2 3 4 5 ] 1 [ 6 7 8 ] putinterval".chars().into())?;
 
-        interpreter.evaluate()?;
-
-        let arr = interpreter.arrays.get(1)?;
+        let arr = interpreter.state.arrays.get(1)?;
         assert_eq!(
             vec![
                 Object::Integer(1),
@@ -1994,9 +1533,9 @@ mod tests {
         ];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
         }
@@ -2011,9 +1550,9 @@ mod tests {
         ];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
@@ -2024,9 +1563,9 @@ mod tests {
         let inputs = ["0 [ 4 ] putinterval", "[ 4 ] putinterval", "putinterval"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -2034,12 +1573,12 @@ mod tests {
 
     #[test]
     fn test_astore() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("1 2 3 4 5 3 array astore".chars());
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("1 2 3 4 5 3 array astore".chars().into())?;
 
-        interpreter.evaluate()?;
-        assert_eq!(2, interpreter.operand_stack.len());
+        assert_eq!(2, interpreter.state.operand_stack.len());
 
-        let arr = interpreter.arrays.get(1)?;
+        let arr = interpreter.state.arrays.get(1)?;
         assert_eq!(
             vec![Object::Integer(3), Object::Integer(4), Object::Integer(5)],
             arr.inner
@@ -2050,9 +1589,9 @@ mod tests {
 
     #[test]
     fn test_astore_typecheck() {
-        let mut interpreter = Interpreter::new("1 2 3 3.14 astore".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 2 3 3.14 astore".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
     }
@@ -2062,9 +1601,9 @@ mod tests {
         let inputs = ["1 2 3 10 array astore", "astore"];
 
         for input in inputs {
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            let result = interpreter.evaluate(input.chars().into());
 
-            let result = interpreter.evaluate();
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
         }
@@ -2072,12 +1611,12 @@ mod tests {
 
     #[test]
     fn test_aload() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("[ 1 2 3 4 5 ] aload".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("[ 1 2 3 4 5 ] aload".chars().into())?;
 
-        assert_eq!(6, interpreter.operand_stack.len());
+        assert_eq!(6, interpreter.state.operand_stack.len());
 
-        let arr = interpreter.pop_array()?;
+        let arr = interpreter.state.pop_array()?;
         assert_eq!(
             vec![
                 Object::Integer(1),
@@ -2089,29 +1628,29 @@ mod tests {
             arr.inner
         );
 
-        assert_eq!(5, interpreter.pop_int()?);
-        assert_eq!(4, interpreter.pop_int()?);
-        assert_eq!(3, interpreter.pop_int()?);
-        assert_eq!(2, interpreter.pop_int()?);
-        assert_eq!(1, interpreter.pop_int()?);
+        assert_eq!(5, interpreter.state.pop_int()?);
+        assert_eq!(4, interpreter.state.pop_int()?);
+        assert_eq!(3, interpreter.state.pop_int()?);
+        assert_eq!(2, interpreter.state.pop_int()?);
+        assert_eq!(1, interpreter.state.pop_int()?);
 
         Ok(())
     }
 
     #[test]
     fn test_aload_typecheck() {
-        let mut interpreter = Interpreter::new("1 aload".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("1 aload".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_aload_underflow() {
-        let mut interpreter = Interpreter::new("aload".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("aload".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
@@ -2120,16 +1659,15 @@ mod tests {
     fn test_packedarray() -> Result<(), Box<dyn error::Error>> {
         for num in 0..5 {
             let input = format!("{num} packedarray");
-            let mut interpreter = Interpreter::new(input.chars());
+            let mut interpreter = Interpreter::default();
+            interpreter.evaluate(input.chars().into())?;
 
-            interpreter.evaluate()?;
-
-            assert_eq!(1, interpreter.operand_stack.len());
-            let Some(Object::PackedArray(arr_idx)) = interpreter.operand_stack.pop() else {
+            assert_eq!(1, interpreter.state.operand_stack.len());
+            let Some(Object::PackedArray(arr_idx)) = interpreter.state.operand_stack.pop() else {
                 return Err("expected packed array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
+            let arr = interpreter.state.arrays.get(arr_idx)?;
             assert!(arr.is_read_only());
             assert_eq!(num, arr.inner.len());
             assert!(arr.inner.iter().all(|obj| matches!(obj, Object::Null)));
@@ -2140,56 +1678,57 @@ mod tests {
 
     #[test]
     fn test_packedarray_typecheck() {
-        let mut interpreter = Interpreter::new("(str) packedarray".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("(str) packedarray".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_packedarray_underflow() {
-        let mut interpreter = Interpreter::new("packedarray".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("packedarray".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_setpacking() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("true setpacking".chars());
-        interpreter.evaluate()?;
-        assert!(interpreter.is_packing);
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("true setpacking".chars().into())?;
+
+        assert!(interpreter.state.is_packing);
 
         Ok(())
     }
 
     #[test]
     fn test_setpacking_typecheck() {
-        let mut interpreter = Interpreter::new("(str) setpacking".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("(str) setpacking".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_setpacking_underflow() {
-        let mut interpreter = Interpreter::new("setpacking".chars());
+        let mut interpreter = Interpreter::default();
+        let result = interpreter.evaluate("setpacking".chars().into());
 
-        let result = interpreter.evaluate();
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_currentpacking() -> Result<(), Box<dyn error::Error>> {
-        let mut interpreter = Interpreter::new("true setpacking currentpacking".chars());
-        interpreter.evaluate()?;
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("true setpacking currentpacking".chars().into())?;
 
-        assert_eq!(1, interpreter.operand_stack.len());
-        assert!(interpreter.pop_bool()?);
+        assert_eq!(1, interpreter.state.operand_stack.len());
+        assert!(interpreter.state.pop_bool()?);
 
         Ok(())
     }
