@@ -8,17 +8,34 @@ use crate::{
 };
 
 #[allow(dead_code)]
-#[derive(Default)]
 pub struct InterpreterState {
     pub arrays: Container<Composite<Vec<Object>>>,
     pub execution_stack: Vec<Object>,
-    pub global_dict: HashMap<String, Object>,
     pub is_packing: bool,
     pub operand_stack: Vec<Object>,
     pub rng: RandomNumberGenerator,
     pub strings: Container<Composite<String>>,
-    pub user_dict: HashMap<String, Object>,
-    pub system_dict: HashMap<String, Object>,
+    pub dicts: Vec<HashMap<String, Object>>,
+}
+
+impl Default for InterpreterState {
+    fn default() -> Self {
+        let mut dicts = Vec::new();
+
+        dicts.push(operators::system_dict());
+        dicts.push(HashMap::new()); // Global Dict
+        dicts.push(HashMap::new()); // User Dict
+
+        Self {
+            arrays: Container::default(),
+            execution_stack: Vec::default(),
+            is_packing: false,
+            operand_stack: Vec::default(),
+            rng: RandomNumberGenerator::default(),
+            strings: Container::default(),
+            dicts,
+        }
+    }
 }
 
 impl InterpreterState {
@@ -77,137 +94,12 @@ impl InterpreterState {
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected boolean")),
         }
     }
-
-    pub fn load_operators(&mut self) {
-        let ops = [
-            ("dup", Object::Operator(operators::dup)),
-            ("exch", Object::Operator(operators::exch)),
-            (
-                "pop",
-                Object::Operator(|state| {
-                    state.pop()?;
-                    Ok(())
-                }),
-            ),
-            ("copy", Object::Operator(operators::copy)),
-            ("roll", Object::Operator(operators::roll)),
-            ("index", Object::Operator(operators::index)),
-            ("mark", Object::Operator(operators::mark)),
-            ("clear", Object::Operator(operators::clear)),
-            ("count", Object::Operator(operators::count)),
-            ("counttomark", Object::Operator(operators::counttomark)),
-            ("cleartomark", Object::Operator(operators::cleartomark)),
-            (
-                "add",
-                Object::Operator(|state| {
-                    operators::arithmetic(state, i32::checked_add, |a: f64, b: f64| a + b)
-                }),
-            ),
-            (
-                "div",
-                Object::Operator(|state| {
-                    operators::arithmetic(state, |_, _| None, |a: f64, b: f64| a / b)
-                }),
-            ),
-            ("idiv", Object::Operator(operators::idiv)),
-            ("imod", Object::Operator(operators::imod)),
-            (
-                "mul",
-                Object::Operator(|state| {
-                    operators::arithmetic(state, i32::checked_mul, |a: f64, b: f64| a * b)
-                }),
-            ),
-            (
-                "sub",
-                Object::Operator(|state| {
-                    operators::arithmetic(state, i32::checked_sub, |a: f64, b: f64| a - b)
-                }),
-            ),
-            (
-                "abs",
-                Object::Operator(|state| operators::num_unary(state, i32::checked_abs, f64::abs)),
-            ),
-            (
-                "neg",
-                Object::Operator(|state| {
-                    operators::num_unary(state, i32::checked_neg, |a: f64| -1.0 * a)
-                }),
-            ),
-            (
-                "ceiling",
-                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::ceil)),
-            ),
-            (
-                "floor",
-                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::floor)),
-            ),
-            (
-                "round",
-                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::round)),
-            ),
-            (
-                "truncate",
-                Object::Operator(|state| operators::num_unary(state, |a: i32| Some(a), f64::trunc)),
-            ),
-            (
-                "sqrt",
-                Object::Operator(|state| operators::real_unary(state, f64::sqrt)),
-            ),
-            ("atan", Object::Operator(operators::atan)),
-            ("cos", Object::Operator(operators::cos)),
-            ("sin", Object::Operator(operators::sin)),
-            (
-                "exp",
-                Object::Operator(|state| {
-                    operators::arithmetic(state, |_, _| None, |base: f64, exp: f64| base.powf(exp))
-                }),
-            ),
-            (
-                "ln",
-                Object::Operator(|state| operators::real_unary(state, f64::ln)),
-            ),
-            (
-                "log",
-                Object::Operator(|state| operators::real_unary(state, f64::log10)),
-            ),
-            ("rand", Object::Operator(operators::rand)),
-            ("srand", Object::Operator(operators::srand)),
-            ("rrand", Object::Operator(operators::rrand)),
-            ("array", Object::Operator(operators::array)),
-            ("[", Object::Operator(operators::mark)),
-            ("]", Object::Operator(operators::endarray)),
-            ("length", Object::Operator(operators::length)),
-            ("get", Object::Operator(operators::get)),
-            ("put", Object::Operator(operators::put)),
-            ("getinterval", Object::Operator(operators::getinterval)),
-            ("putinterval", Object::Operator(operators::putinterval)),
-            ("astore", Object::Operator(operators::astore)),
-            ("aload", Object::Operator(operators::aload)),
-            ("packedarray", Object::Operator(operators::packedarray)),
-            ("setpacking", Object::Operator(operators::setpacking)),
-            (
-                "currentpacking",
-                Object::Operator(operators::currentpacking),
-            ),
-        ];
-
-        for (key, op) in ops {
-            self.system_dict.insert(key.to_string(), op);
-        }
-    }
 }
 
+#[derive(Default)]
+#[repr(transparent)]
 pub struct Interpreter {
     state: InterpreterState,
-}
-
-impl Default for Interpreter {
-    fn default() -> Self {
-        let mut state = InterpreterState::default();
-        state.load_operators();
-
-        Self { state }
-    }
 }
 
 impl Interpreter {
@@ -231,17 +123,12 @@ impl Interpreter {
                 self.state.push(obj);
                 Ok(())
             },
+            Object::Operator(op) => op(&mut self.state),
             Object::Name(name) => {
-                if let Some(obj) = self.state.user_dict.get(&name) {
-                    return self.execute_object(obj.clone());
-                }
-
-                if let Some(obj) = self.state.global_dict.get(&name) {
-                    return self.execute_object(obj.clone());
-                }
-
-                if let Some(Object::Operator(op)) = self.state.system_dict.get(&name) {
-                    return op(&mut self.state);
+                for dict in self.state.dicts.iter().rev() {
+                    if let Some(obj) = dict.get(&name) {
+                        return self.execute_object(obj.clone());
+                    }
                 }
 
                 Err(Error::new(ErrorKind::Undefined, name))
