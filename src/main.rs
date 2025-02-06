@@ -17,10 +17,10 @@ fn main() -> io::Result<()> {
     let mut buf = String::new();
     let mut interpreter = Interpreter::default();
 
-    output.write(b"libPS 0.0.0")?;
+    output.write_all(b"libPS 0.0.0")?;
 
     loop {
-        output.write(b"\n>>> ")?;
+        output.write_all(b"\n>>> ")?;
         output.flush()?;
 
         input.read_line(&mut buf)?;
@@ -33,7 +33,7 @@ fn main() -> io::Result<()> {
             fatal(&e.to_string());
         }
 
-        output.write(b"|-")?;
+        output.write_all(b"|-")?;
         interpreter.write_stack(&mut output)?;
 
         buf.clear();
