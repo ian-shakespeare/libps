@@ -68,7 +68,12 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let name: &str = self.kind().into();
         let message: String = self.error.to_string();
-        write!(f, "{}: {}", name, message)
+
+        if message.is_empty() {
+            write!(f, "{name}")
+        } else {
+            write!(f, "{name}: {message}")
+        }
     }
 }
 

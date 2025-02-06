@@ -65,6 +65,10 @@ impl From<Object> for String {
             Object::Real(value) => value.to_string(),
             Object::Boolean(value) => value.to_string(),
             Object::Name(value) => value,
+            Object::Array(_) => "array".to_string(),
+            Object::PackedArray(_) => "packedarray".to_string(),
+            Object::Mark => "mark".to_string(),
+            Object::Null => "null".to_string(),
             _ => "".to_string(),
         }
     }
@@ -167,7 +171,7 @@ impl<V> Container<V> {
         self.counter
     }
 
-    pub fn get(&mut self, k: usize) -> crate::Result<&V> {
+    pub fn get(&self, k: usize) -> crate::Result<&V> {
         match self.inner.get(&k) {
             Some(v) => Ok(v),
             None => Err(Error::from(ErrorKind::VmError)),
