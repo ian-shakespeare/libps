@@ -11,7 +11,9 @@ mod math_operators;
 mod stack_operators;
 
 pub fn system_dict() -> HashMap<String, Object> {
-    let ops: Vec<(&str, fn(&mut InterpreterState) -> crate::Result<()>)> = vec![
+    type KeyOperatorPair = (&'static str, fn(&mut InterpreterState) -> crate::Result<()>);
+
+    let ops: Vec<KeyOperatorPair> = vec![
         ("dup", dup),
         ("exch", exch),
         ("pop", |state| {

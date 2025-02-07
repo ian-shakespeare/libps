@@ -20,20 +20,14 @@ pub struct InterpreterState {
 
 impl Default for InterpreterState {
     fn default() -> Self {
-        let mut dicts = Vec::new();
-
-        dicts.push(operators::system_dict());
-        dicts.push(HashMap::new()); // Global Dict
-        dicts.push(HashMap::new()); // User Dict
-
         Self {
             arrays: Container::default(),
+            dicts: vec![operators::system_dict(), HashMap::new(), HashMap::new()],
             execution_stack: Vec::default(),
             is_packing: false,
             operand_stack: Vec::default(),
             rng: RandomNumberGenerator::default(),
             strings: Container::default(),
-            dicts,
         }
     }
 }
