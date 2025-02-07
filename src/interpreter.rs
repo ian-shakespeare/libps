@@ -1,7 +1,7 @@
-use std::{collections::HashMap, io};
+use std::io;
 
 use crate::{
-    object::{Composite, Container, Object},
+    object::{Access, Container, Object, PostScriptArray, PostScriptDictionary, PostScriptString},
     operators,
     rand::RandomNumberGenerator,
     Error, ErrorKind, Lexer,
@@ -9,25 +9,35 @@ use crate::{
 
 #[allow(dead_code)]
 pub struct InterpreterState {
-    pub arrays: Container<Composite<Vec<Object>>>,
+    pub arrays: Container<PostScriptArray>,
+    pub dict_stack: Vec<usize>,
+    pub dicts: Container<PostScriptDictionary>,
     pub execution_stack: Vec<Object>,
     pub is_packing: bool,
     pub operand_stack: Vec<Object>,
     pub rng: RandomNumberGenerator,
-    pub strings: Container<Composite<String>>,
-    pub dicts: Vec<HashMap<String, Object>>,
+    pub strings: Container<PostScriptString>,
 }
 
 impl Default for InterpreterState {
     fn default() -> Self {
+        let mut dicts = Container::default();
+
+        let mut system_dict = PostScriptDictionary::from(operators::system_dict());
+        system_dict.set_access(Access::ExecuteOnly);
+        let system_dict_idx = dicts.insert(system_dict);
+
+        // TODO: Insert global & user dict
+
         Self {
             arrays: Container::default(),
-            dicts: vec![operators::system_dict(), HashMap::new(), HashMap::new()],
+            dict_stack: vec![system_dict_idx],
             execution_stack: Vec::default(),
             is_packing: false,
             operand_stack: Vec::default(),
             rng: RandomNumberGenerator::default(),
             strings: Container::default(),
+            dicts,
         }
     }
 }
@@ -68,14 +78,14 @@ impl InterpreterState {
         }
     }
 
-    pub fn pop_array(&mut self) -> crate::Result<&Composite<Vec<Object>>> {
+    pub fn pop_array(&mut self) -> crate::Result<&PostScriptArray> {
         match self.pop()? {
             Object::Array(idx) => Ok(self.arrays.get(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
 
-    pub fn pop_array_mut(&mut self) -> crate::Result<&mut Composite<Vec<Object>>> {
+    pub fn pop_array_mut(&mut self) -> crate::Result<&mut PostScriptArray> {
         match self.pop()? {
             Object::Array(idx) => Ok(self.arrays.get_mut(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
@@ -120,9 +130,11 @@ impl Interpreter {
             },
             Object::Operator(op) => op(&mut self.state),
             Object::Name(name) => {
-                for dict in self.state.dicts.iter().rev() {
-                    if let Some(obj) = dict.get(&name) {
-                        return self.execute_object(obj.clone());
+                for dict_idx in self.state.dict_stack.iter().rev() {
+                    if let Ok(dict) = self.state.dicts.get(*dict_idx) {
+                        if let Ok(obj) = dict.get(name.clone()) {
+                            return self.execute_object(obj.clone());
+                        }
                     }
                 }
 
@@ -165,8 +177,7 @@ impl Interpreter {
                             io::ErrorKind::NotFound,
                             "missing string",
                         )))?
-                        .inner
-                        .clone()
+                        .value()
                 );
                 let output = string.as_bytes();
 
@@ -183,10 +194,9 @@ impl Interpreter {
                         io::ErrorKind::NotFound,
                         "missing array",
                     )))?
-                    .inner
-                    .clone();
+                    .value();
 
-                for obj in &arr {
+                for obj in arr {
                     count += writer.write(b" ")?;
                     count += self.write_object(writer, obj)?;
                 }
@@ -206,10 +216,9 @@ impl Interpreter {
                         io::ErrorKind::NotFound,
                         "missing array",
                     )))?
-                    .inner
-                    .clone();
+                    .value();
 
-                for obj in &arr {
+                for obj in arr {
                     count += writer.write(b" ")?;
                     count += self.write_object(writer, obj)?;
                 }
@@ -358,9 +367,9 @@ mod tests {
 
         let arr = interpreter.state.arrays.get(arr_idx)?;
 
-        assert_eq!(Some(Object::Integer(1)), arr.inner.get(0).cloned());
-        assert_eq!(Some(Object::Integer(2)), arr.inner.get(1).cloned());
-        assert_eq!(Some(Object::Integer(3)), arr.inner.get(2).cloned());
+        assert_eq!(Some(Object::Integer(1)), arr.value().get(0).cloned());
+        assert_eq!(Some(Object::Integer(2)), arr.value().get(1).cloned());
+        assert_eq!(Some(Object::Integer(3)), arr.value().get(2).cloned());
 
         Ok(())
     }
@@ -1115,8 +1124,8 @@ mod tests {
             };
 
             let arr = interpreter.state.arrays.get(arr_idx)?;
-            assert_eq!(num, arr.inner.len());
-            assert!(arr.inner.iter().all(|obj| matches!(obj, Object::Null)));
+            assert_eq!(num, arr.len());
+            assert!(arr.value().iter().all(|obj| matches!(obj, Object::Null)));
         }
 
         Ok(())
@@ -1180,9 +1189,9 @@ mod tests {
             };
 
             let arr = interpreter.state.arrays.get(arr_idx)?;
-            assert_eq!(length, arr.inner.len());
+            assert_eq!(length, arr.len());
             assert!(arr
-                .inner
+                .value()
                 .iter()
                 .all(|obj| matches!(obj, Object::Integer(0))));
         }
@@ -1296,7 +1305,7 @@ mod tests {
             assert_eq!(0, interpreter.state.operand_stack.len());
 
             let arr = interpreter.state.arrays.get(1)?;
-            assert_eq!(Some(Object::Real(3.14)), arr.inner.get(i).cloned());
+            assert_eq!(Some(Object::Real(3.14)), arr.value().get(i).cloned());
         }
 
         Ok(())
@@ -1355,7 +1364,7 @@ mod tests {
         let arr = interpreter.state.pop_array()?;
         assert_eq!(
             vec![Object::Integer(2), Object::Integer(3), Object::Integer(4)],
-            arr.inner
+            arr.value().clone()
         );
 
         Ok(())
@@ -1423,7 +1432,7 @@ mod tests {
                 Object::Integer(8),
                 Object::Integer(5),
             ],
-            arr.inner
+            arr.value().clone()
         );
 
         Ok(())
@@ -1486,7 +1495,7 @@ mod tests {
         let arr = interpreter.state.arrays.get(1)?;
         assert_eq!(
             vec![Object::Integer(3), Object::Integer(4), Object::Integer(5)],
-            arr.inner
+            arr.value().clone()
         );
 
         Ok(())
@@ -1530,7 +1539,7 @@ mod tests {
                 Object::Integer(4),
                 Object::Integer(5)
             ],
-            arr.inner
+            arr.value().clone()
         );
 
         assert_eq!(5, interpreter.state.pop_int()?);
@@ -1573,9 +1582,9 @@ mod tests {
             };
 
             let arr = interpreter.state.arrays.get(arr_idx)?;
-            assert!(arr.is_read_only());
-            assert_eq!(num, arr.inner.len());
-            assert!(arr.inner.iter().all(|obj| matches!(obj, Object::Null)));
+            assert!(arr.access().is_read_only());
+            assert_eq!(num, arr.len());
+            assert!(arr.value().iter().all(|obj| matches!(obj, Object::Null)));
         }
 
         Ok(())

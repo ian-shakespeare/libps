@@ -1,6 +1,6 @@
 use crate::{
     interpreter::InterpreterState,
-    object::{Access, Composite},
+    object::{Access, PostScriptArray},
     Error, ErrorKind, Object,
 };
 
@@ -9,14 +9,8 @@ use super::usize_to_i32;
 pub fn array(state: &mut InterpreterState) -> crate::Result<()> {
     let len = state.pop_usize()?;
 
-    let inner = vec![Object::Null; len];
-    let composite = Composite {
-        access: Access::default(),
-        len,
-        inner,
-    };
+    let idx = state.arrays.insert(vec![Object::Null; len].into());
 
-    let idx = state.arrays.insert(composite);
     state.push(Object::Array(idx));
 
     Ok(())
@@ -39,41 +33,7 @@ pub fn endarray(state: &mut InterpreterState) -> crate::Result<()> {
     }
 
     arr.reverse();
-
-    let len = arr.len();
-    let composite = Composite {
-        access: Access::default(),
-        inner: arr,
-        len,
-    };
-
-    let idx = state.arrays.insert(composite);
-    state.push(Object::Array(idx));
-
-    Ok(())
-}
-
-pub fn proc(state: &mut InterpreterState) -> crate::Result<()> {
-    let mut inner = Vec::new();
-
-    loop {
-        let obj = state.pop()?;
-        if let Object::Name(ref name) = obj {
-            if name == "}" {
-                break;
-            }
-        }
-
-        inner.push(obj);
-    }
-
-    let composite = Composite {
-        access: Access::ExecuteOnly,
-        len: inner.len(),
-        inner,
-    };
-
-    let idx = state.arrays.insert(composite);
+    let idx = state.arrays.insert(arr.into());
 
     state.push(Object::Array(idx));
 
@@ -87,11 +47,11 @@ pub fn length(state: &mut InterpreterState) -> crate::Result<()> {
         Object::Array(idx) | Object::PackedArray(idx) => {
             let arr = state.arrays.get(idx)?;
 
-            if !arr.is_readable() {
+            if !arr.access().is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok(arr.len)
+            Ok(arr.len())
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -110,11 +70,11 @@ pub fn get(state: &mut InterpreterState) -> crate::Result<()> {
         Object::Array(idx) | Object::PackedArray(idx) => {
             let arr = state.arrays.get(idx)?;
 
-            if arr.is_exec_only() {
+            if arr.access().is_exec_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            match arr.inner.get(index) {
+            match arr.value().get(index) {
                 Some(obj) => Ok(obj.clone()),
                 None => Err(Error::from(ErrorKind::RangeCheck)),
             }
@@ -132,11 +92,11 @@ pub fn put(state: &mut InterpreterState) -> crate::Result<()> {
     let index = state.pop_usize()?;
     let arr = state.pop_array_mut()?;
 
-    if !arr.is_writeable() {
+    if !arr.access().is_writeable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let Some(obj) = arr.inner.get_mut(index) else {
+    let Some(obj) = arr.value_mut().get_mut(index) else {
         return Err(Error::from(ErrorKind::RangeCheck));
     };
 
@@ -154,11 +114,11 @@ pub fn getinterval(state: &mut InterpreterState) -> crate::Result<()> {
         Object::Array(idx) | Object::PackedArray(idx) => {
             let arr = state.arrays.get(idx)?;
 
-            if !arr.is_readable() {
+            if !arr.access().is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok(arr.inner.clone())
+            Ok(arr.value().clone())
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -175,13 +135,8 @@ pub fn getinterval(state: &mut InterpreterState) -> crate::Result<()> {
         subarr.push(obj.clone());
     }
 
-    let composite = Composite {
-        access: Access::default(),
-        inner: subarr,
-        len: count,
-    };
+    let idx = state.arrays.insert(subarr.into());
 
-    let idx = state.arrays.insert(composite);
     state.push(Object::Array(idx));
 
     Ok(())
@@ -190,21 +145,21 @@ pub fn getinterval(state: &mut InterpreterState) -> crate::Result<()> {
 pub fn putinterval(state: &mut InterpreterState) -> crate::Result<()> {
     let source = state.pop_array()?;
 
-    if !source.is_readable() {
+    if !source.access().is_readable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let source = source.inner.clone();
+    let source = source.value().clone();
 
     let index = state.pop_usize()?;
     let destination = state.pop_array_mut()?;
 
-    if !destination.is_writeable() {
+    if !destination.access().is_writeable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
     for (offset, obj) in source.into_iter().enumerate() {
-        let Some(dest_obj) = destination.inner.get_mut(index + offset) else {
+        let Some(dest_obj) = destination.value_mut().get_mut(index + offset) else {
             return Err(Error::from(ErrorKind::RangeCheck));
         };
 
@@ -221,10 +176,10 @@ pub fn astore(state: &mut InterpreterState) -> crate::Result<()> {
 
     let len = match state.arrays.get(arr_idx) {
         Ok(composite) => {
-            if !composite.is_writeable() {
+            if !composite.access().is_writeable() {
                 Err(Error::from(ErrorKind::InvalidAccess))
             } else {
-                Ok(composite.len)
+                Ok(composite.len())
             }
         },
         Err(_) => Err(Error::from(ErrorKind::Undefined)),
@@ -238,7 +193,8 @@ pub fn astore(state: &mut InterpreterState) -> crate::Result<()> {
 
     match state.arrays.get_mut(arr_idx) {
         Ok(composite) => {
-            composite.inner = stored;
+            let existing = composite.value_mut();
+            *existing = stored;
             Ok(())
         },
         Err(_) => Err(Error::from(ErrorKind::Undefined)),
@@ -252,11 +208,11 @@ pub fn aload(state: &mut InterpreterState) -> crate::Result<()> {
         Object::Array(idx) | Object::PackedArray(idx) => {
             let arr = state.arrays.get(idx)?;
 
-            if !arr.is_readable() {
+            if !arr.access().is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok((idx, arr.inner.clone()))
+            Ok((idx, arr.value().clone()))
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -271,17 +227,11 @@ pub fn aload(state: &mut InterpreterState) -> crate::Result<()> {
 }
 
 pub fn packedarray(state: &mut InterpreterState) -> crate::Result<()> {
-    let len = state.pop_usize()?;
+    let size = state.pop_usize()?;
 
-    let inner = vec![Object::Null; len];
+    let arr = PostScriptArray::new(vec![Object::Null; size], Access::ReadOnly);
 
-    let composite = Composite {
-        access: Access::ReadOnly,
-        len,
-        inner,
-    };
-
-    let index = state.arrays.insert(composite);
+    let index = state.arrays.insert(arr);
 
     state.push(Object::PackedArray(index));
 

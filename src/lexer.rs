@@ -2,7 +2,7 @@ use std::iter;
 
 use crate::{
     encoding::{decode_ascii85, decode_hex},
-    object::{Access, Composite, Container, Object},
+    object::{Access, Container, Object, PostScriptArray, PostScriptString},
     Error, ErrorKind,
 };
 
@@ -30,8 +30,8 @@ where
 {
     pub fn next_obj(
         &mut self,
-        strings: &mut Container<Composite<String>>,
-        arrays: &mut Container<Composite<Vec<Object>>>,
+        strings: &mut Container<PostScriptString>,
+        arrays: &mut Container<PostScriptArray>,
     ) -> Option<crate::Result<Object>> {
         loop {
             if self.next_is_whitespace() {
@@ -77,7 +77,7 @@ where
         Ok(())
     }
 
-    fn lex_gt(&mut self, strings: &mut Container<Composite<String>>) -> crate::Result<Object> {
+    fn lex_gt(&mut self, strings: &mut Container<PostScriptString>) -> crate::Result<Object> {
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
@@ -197,12 +197,12 @@ where
 
     fn lex_procedure(
         &mut self,
-        strings: &mut Container<Composite<String>>,
-        arrays: &mut Container<Composite<Vec<Object>>>,
+        strings: &mut Container<PostScriptString>,
+        arrays: &mut Container<PostScriptArray>,
     ) -> crate::Result<Object> {
         self.expect_char('{')?;
 
-        let mut inner = Vec::new();
+        let mut objs = Vec::new();
 
         loop {
             let obj = self
@@ -215,23 +215,18 @@ where
                 }
             }
 
-            inner.push(obj);
+            objs.push(obj);
         }
 
-        let composite = Composite {
-            access: Access::ExecuteOnly,
-            len: inner.len(),
-            inner,
-        };
-
-        let idx = arrays.insert(composite);
+        let proc = PostScriptArray::new(objs, Access::ExecuteOnly);
+        let idx = arrays.insert(proc);
 
         Ok(Object::Procedure(idx))
     }
 
     fn lex_string_base85(
         &mut self,
-        strings: &mut Container<Composite<String>>,
+        strings: &mut Container<PostScriptString>,
     ) -> crate::Result<Object> {
         let mut string = String::new();
 
@@ -257,22 +252,15 @@ where
             }
         }
 
-        let inner = decode_ascii85(&string)?;
-        let len = inner.len();
-        let composite = Composite {
-            access: Access::default(),
-            inner,
-            len,
-        };
-
-        let idx = strings.insert(composite);
+        let string = decode_ascii85(&string)?;
+        let idx = strings.insert(string.into());
 
         Ok(Object::String(idx))
     }
 
     fn lex_string_hex(
         &mut self,
-        strings: &mut Container<Composite<String>>,
+        strings: &mut Container<PostScriptString>,
     ) -> crate::Result<Object> {
         let mut string = String::new();
 
@@ -293,22 +281,15 @@ where
             }
         }
 
-        let inner = decode_hex(&string)?;
-        let len = inner.len();
-        let composite = Composite {
-            access: Access::default(),
-            inner,
-            len,
-        };
-
-        let idx = strings.insert(composite);
+        let string = decode_hex(&string)?;
+        let idx = strings.insert(string.into());
 
         Ok(Object::String(idx))
     }
 
     fn lex_string_literal(
         &mut self,
-        strings: &mut Container<Composite<String>>,
+        strings: &mut Container<PostScriptString>,
     ) -> crate::Result<Object> {
         self.expect_char('(')?;
 
@@ -384,14 +365,7 @@ where
             }
         }
 
-        let len = string.len();
-        let composite = Composite {
-            access: Access::default(),
-            inner: string,
-            len,
-        };
-
-        let idx = strings.insert(composite);
+        let idx = strings.insert(string.into());
 
         Ok(Object::String(idx))
     }
@@ -569,7 +543,7 @@ mod tests {
 
             let string = strings.get(str_idx)?;
 
-            assert_eq!(expect, string.inner);
+            assert_eq!(expect, string.value());
         }
 
         Ok(())
@@ -604,7 +578,7 @@ mod tests {
 
             let string = strings.get(str_idx)?;
 
-            assert_eq!(expect, string.inner);
+            assert_eq!(expect, string.value());
         }
 
         Ok(())
@@ -623,7 +597,7 @@ mod tests {
 
         let string = strings.get(str_idx)?;
 
-        assert_eq!("ii", string.inner);
+        assert_eq!("ii", string.value());
 
         Ok(())
     }
@@ -644,7 +618,7 @@ mod tests {
 
             let string = strings.get(str_idx)?;
 
-            assert_eq!(expect, string.inner);
+            assert_eq!(expect, string.value());
         }
 
         Ok(())
@@ -673,7 +647,7 @@ mod tests {
 
             let string = strings.get(str_idx)?;
 
-            assert_eq!(expect, string.inner);
+            assert_eq!(expect, string.value());
         }
 
         Ok(())
@@ -693,7 +667,7 @@ mod tests {
 
         let string = strings.get(str_idx)?;
 
-        assert_eq!(expect, string.inner);
+        assert_eq!(expect, string.value());
 
         Ok(())
     }
@@ -719,7 +693,7 @@ mod tests {
 
             let string = strings.get(str_idx)?;
 
-            assert_eq!(e, string.inner);
+            assert_eq!(e, string.value());
         }
 
         Ok(())
@@ -788,17 +762,17 @@ mod tests {
             };
 
             let outer = arrays.get(outer_idx)?;
-            assert!(outer.is_exec_only());
-            assert_eq!(1, outer.len);
+            assert!(outer.access().is_exec_only());
+            assert_eq!(1, outer.len());
 
-            let Some(Object::Procedure(inner_idx)) = outer.inner.first() else {
+            let Some(Object::Procedure(inner_idx)) = outer.value().first() else {
                 return Err("expected procedure object".into());
             };
 
             let inner = arrays.get(*inner_idx)?;
-            assert!(inner.is_exec_only());
-            assert_eq!(1, inner.len);
-            assert_eq!(Some(Object::Integer(1)), inner.inner.first().cloned());
+            assert!(inner.access().is_exec_only());
+            assert_eq!(1, inner.len());
+            assert_eq!(Some(Object::Integer(1)), inner.value().first().cloned());
         }
 
         Ok(())
@@ -890,7 +864,7 @@ myNegativeReal -3.1456
             return Err("expected string object".into());
         };
         let string = strings.get(str_idx)?;
-        assert_eq!("i have a string right here", string.inner);
+        assert_eq!("i have a string right here", string.value());
 
         let name = lexer
             .next_obj(&mut strings, &mut arrays)
@@ -901,7 +875,7 @@ myNegativeReal -3.1456
             return Err("expected string object".into());
         };
         let string = strings.get(str_idx)?;
-        assert_eq!("and\nanother right here", string.inner);
+        assert_eq!("and\nanother right here", string.value());
 
         let name = lexer
             .next_obj(&mut strings, &mut arrays)

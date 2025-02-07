@@ -2,43 +2,6 @@ use std::collections::HashMap;
 
 use crate::{interpreter::InterpreterState, Error, ErrorKind};
 
-#[derive(Default)]
-pub enum Access {
-    #[default]
-    Unlimited,
-    ReadOnly,
-    ExecuteOnly,
-    None,
-}
-
-pub struct Composite<T> {
-    pub inner: T,
-    pub access: Access,
-    pub len: usize,
-}
-
-impl<T> Composite<T> {
-    pub fn is_read_only(&self) -> bool {
-        matches!(self.access, Access::ReadOnly)
-    }
-
-    pub fn is_exec_only(&self) -> bool {
-        matches!(self.access, Access::ExecuteOnly)
-    }
-
-    pub fn has_no_access(&self) -> bool {
-        matches!(self.access, Access::None)
-    }
-
-    pub fn is_writeable(&self) -> bool {
-        matches!(self.access, Access::Unlimited)
-    }
-
-    pub fn is_readable(&self) -> bool {
-        self.is_writeable() || self.is_read_only()
-    }
-}
-
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer(i32),
@@ -185,5 +148,180 @@ impl<V> Container<V> {
             Some(v) => Ok(v),
             None => Err(Error::from(ErrorKind::VmError)),
         }
+    }
+}
+
+#[derive(Clone, Copy, Default)]
+pub enum Access {
+    #[default]
+    Unlimited,
+    ReadOnly,
+    ExecuteOnly,
+    None,
+}
+
+impl Access {
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, Access::ReadOnly)
+    }
+
+    pub fn is_exec_only(&self) -> bool {
+        matches!(self, Access::ExecuteOnly)
+    }
+
+    pub fn has_no_access(&self) -> bool {
+        matches!(self, Access::None)
+    }
+
+    pub fn is_writeable(&self) -> bool {
+        matches!(self, Access::Unlimited)
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.is_writeable() || self.is_read_only()
+    }
+}
+
+pub struct PostScriptArray {
+    access: Access,
+    inner: Vec<Object>,
+    len: usize,
+}
+
+impl From<Vec<Object>> for PostScriptArray {
+    fn from(value: Vec<Object>) -> Self {
+        Self::new(value, Access::default())
+    }
+}
+
+impl PostScriptArray {
+    pub fn new(value: Vec<Object>, access: Access) -> Self {
+        let len = value.len();
+
+        Self {
+            inner: value,
+            access,
+            len,
+        }
+    }
+
+    pub fn value(&self) -> &Vec<Object> {
+        &self.inner
+    }
+
+    pub fn value_mut(&mut self) -> &mut Vec<Object> {
+        &mut self.inner
+    }
+
+    pub fn access(&self) -> Access {
+        self.access
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
+pub struct PostScriptDictionary {
+    access: Access,
+    capacity: usize,
+    inner: HashMap<String, Object>,
+    len: usize,
+}
+
+impl From<HashMap<String, Object>> for PostScriptDictionary {
+    fn from(value: HashMap<String, Object>) -> Self {
+        Self {
+            access: Access::default(),
+            capacity: value.len(),
+            len: value.len(),
+            inner: value,
+        }
+    }
+}
+
+impl PostScriptDictionary {
+    pub fn new(capacity: usize, access: Access) -> Self {
+        Self {
+            inner: HashMap::new(),
+            len: 0,
+            access,
+            capacity,
+        }
+    }
+
+    pub fn insert(&mut self, key: String, obj: Object) -> crate::Result<()> {
+        if self.len + 1 > self.capacity {
+            return Err(Error::from(ErrorKind::DictFull));
+        }
+
+        self.len += 1;
+        let _ = self.inner.insert(key, obj);
+
+        Ok(())
+    }
+
+    pub fn get(&self, key: String) -> crate::Result<&Object> {
+        self.inner
+            .get(&key)
+            .ok_or(Error::new(ErrorKind::Undefined, key))
+    }
+
+    pub fn get_mut(&mut self, key: String) -> crate::Result<&mut Object> {
+        self.inner
+            .get_mut(&key)
+            .ok_or(Error::new(ErrorKind::Undefined, key))
+    }
+
+    pub fn access(&self) -> Access {
+        self.access
+    }
+
+    pub fn set_access(&mut self, access: Access) {
+        self.access = access;
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+}
+
+pub struct PostScriptString {
+    access: Access,
+    inner: String,
+    len: usize,
+}
+
+impl From<String> for PostScriptString {
+    fn from(value: String) -> Self {
+        Self::new(value, Access::default())
+    }
+}
+
+impl PostScriptString {
+    pub fn new(value: String, access: Access) -> Self {
+        let len = value.len();
+
+        Self {
+            inner: value,
+            access,
+            len,
+        }
+    }
+
+    pub fn value(&self) -> &str {
+        &self.inner
+    }
+
+    pub fn access(&self) -> Access {
+        self.access
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
     }
 }

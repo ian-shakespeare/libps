@@ -55,20 +55,20 @@ pub fn copy(state: &mut InterpreterState) -> crate::Result<()> {
                 _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
             }?;
 
-            if source.is_exec_only() {
+            if source.access().is_exec_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            let source = source.inner.clone();
+            let source = source.value().clone();
 
             let destination = state.arrays.get_mut(dest_idx)?;
 
-            if destination.is_read_only() {
+            if destination.access().is_read_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
             for (index, obj) in source.into_iter().enumerate() {
-                match destination.inner.get_mut(index) {
+                match destination.value_mut().get_mut(index) {
                     Some(dest_obj) => *dest_obj = obj,
                     None => return Err(Error::from(ErrorKind::RangeCheck)),
                 }

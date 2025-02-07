@@ -7,6 +7,7 @@ use stack_operators::*;
 use crate::{interpreter::InterpreterState, Error, ErrorKind, Object};
 
 mod array_operators;
+mod dict_operators;
 mod math_operators;
 mod stack_operators;
 
@@ -73,7 +74,6 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("array", array),
         ("[", mark),
         ("]", endarray),
-        ("{", proc),
         ("length", length),
         ("get", get),
         ("put", put),
