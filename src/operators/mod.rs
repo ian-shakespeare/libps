@@ -71,6 +71,7 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("array", array),
         ("[", mark),
         ("]", endarray),
+        ("{", proc),
         ("length", length),
         ("get", get),
         ("put", put),

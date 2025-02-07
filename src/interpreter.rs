@@ -107,7 +107,7 @@ impl Interpreter {
     where
         I: Iterator<Item = char>,
     {
-        while let Some(obj) = lexer.next_obj(&mut self.state.strings) {
+        while let Some(obj) = lexer.next_obj(&mut self.state.strings, &mut self.state.arrays) {
             self.execute_object(obj?)?;
         }
         Ok(())
@@ -119,6 +119,7 @@ impl Interpreter {
             | Object::Real(_)
             | Object::Boolean(_)
             | Object::String(_)
+            | Object::Procedure(_)
             | Object::Literal(_) => {
                 self.state.push(obj);
                 Ok(())
@@ -197,6 +198,29 @@ impl Interpreter {
                 }
 
                 count += writer.write(b" ]")?;
+
+                Ok(count)
+            },
+            Object::Procedure(idx) => {
+                let mut count = writer.write(b"{")?;
+
+                let arr = self
+                    .state
+                    .arrays
+                    .get(*idx)
+                    .or(Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "missing array",
+                    )))?
+                    .inner
+                    .clone();
+
+                for obj in &arr {
+                    count += writer.write(b" ")?;
+                    count += self.write_object(writer, obj)?;
+                }
+
+                count += writer.write(b" }")?;
 
                 Ok(count)
             },

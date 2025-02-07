@@ -53,6 +53,33 @@ pub fn endarray(state: &mut InterpreterState) -> crate::Result<()> {
     Ok(())
 }
 
+pub fn proc(state: &mut InterpreterState) -> crate::Result<()> {
+    let mut inner = Vec::new();
+
+    loop {
+        let obj = state.pop()?;
+        if let Object::Name(ref name) = obj {
+            if name == "}" {
+                break;
+            }
+        }
+
+        inner.push(obj);
+    }
+
+    let composite = Composite {
+        access: Access::ExecuteOnly,
+        len: inner.len(),
+        inner,
+    };
+
+    let idx = state.arrays.insert(composite);
+
+    state.push(Object::Array(idx));
+
+    Ok(())
+}
+
 pub fn length(state: &mut InterpreterState) -> crate::Result<()> {
     let obj = state.pop()?;
 

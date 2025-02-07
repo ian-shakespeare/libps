@@ -46,6 +46,7 @@ pub enum Object {
     Boolean(bool),
     Array(usize),
     PackedArray(usize),
+    Procedure(usize),
     String(usize),
     Dictionary(usize),
     Literal(String),
