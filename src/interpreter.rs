@@ -227,6 +227,30 @@ impl Interpreter {
 
                 Ok(count)
             },
+            Object::Dictionary(idx) => {
+                let mut count = writer.write(b"<<")?;
+
+                let dict = self
+                    .state
+                    .dicts
+                    .get(*idx)
+                    .or(Err(io::Error::new(io::ErrorKind::NotFound, "missing dict")))?
+                    .value();
+
+                for (key, value) in dict {
+                    count += writer.write(b" ")?;
+
+                    let key: Vec<u8> = key.bytes().collect();
+                    count += writer.write(&key)?;
+
+                    count += writer.write(b" ")?;
+                    count += self.write_object(writer, value)?;
+                }
+
+                count += writer.write(b" >>")?;
+
+                Ok(count)
+            },
             Object::Name(name) | Object::Literal(name) => writer.write(name.as_bytes()),
             Object::Mark => writer.write(b"mark"),
             Object::Null => writer.write(b"null"),

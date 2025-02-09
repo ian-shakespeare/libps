@@ -1,6 +1,7 @@
 use std::{collections::HashMap, f64::consts};
 
 use array_operators::*;
+use dict_operators::*;
 use math_operators::*;
 use stack_operators::*;
 
@@ -84,6 +85,9 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("packedarray", packedarray),
         ("setpacking", setpacking),
         ("currentpacking", currentpacking),
+        ("dict", dict),
+        ("<<", mark),
+        (">>", enddict),
     ];
 
     let mut system_dict = HashMap::new();

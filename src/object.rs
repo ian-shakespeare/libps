@@ -85,6 +85,19 @@ impl PartialEq for Object {
 impl Eq for Object {}
 
 impl Object {
+    pub fn to_string(&self, state: &InterpreterState) -> crate::Result<String> {
+        match self {
+            Object::Integer(i) => Ok(i.to_string()),
+            Object::Real(r) => Ok(r.to_string()),
+            Object::String(idx) => Ok(state.strings.get(*idx)?.inner.clone()),
+            Object::Name(name) | Object::Literal(name) => Ok(name.to_string()),
+            _ => Err(Error::new(
+                ErrorKind::Unregistered,
+                "cannot stringify object",
+            )),
+        }
+    }
+
     pub fn is_int(&self) -> bool {
         matches!(self, Self::Integer(_))
     }
@@ -95,6 +108,10 @@ impl Object {
 
     pub fn is_string(&self) -> bool {
         matches!(self, Self::String(_))
+    }
+
+    pub fn is_mark(&self) -> bool {
+        matches!(self, Self::Mark)
     }
 
     pub fn into_int(&self) -> crate::Result<i32> {
@@ -287,6 +304,10 @@ impl PostScriptDictionary {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn value(&self) -> &HashMap<String, Object> {
+        &self.inner
     }
 }
 

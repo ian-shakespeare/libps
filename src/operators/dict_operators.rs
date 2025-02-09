@@ -1,7 +1,9 @@
+use std::collections::HashMap;
+
 use crate::{
     interpreter::InterpreterState,
     object::{Access, PostScriptDictionary},
-    Object,
+    Error, ErrorKind, Object,
 };
 
 pub fn dict(state: &mut InterpreterState) -> crate::Result<()> {
@@ -17,6 +19,27 @@ pub fn dict(state: &mut InterpreterState) -> crate::Result<()> {
 }
 
 pub fn enddict(state: &mut InterpreterState) -> crate::Result<()> {
+    let mut dict = HashMap::new();
+
+    loop {
+        let value = state.pop()?;
+        if value.is_mark() {
+            break;
+        }
+
+        let key = state.pop()?;
+        if key.is_mark() {
+            return Err(Error::from(ErrorKind::RangeCheck));
+        }
+
+        let key = key.to_string(state)?;
+
+        dict.insert(key, value);
+    }
+
+    let idx = state.dicts.insert(dict.into());
+    state.push(Object::Dictionary(idx));
+
     Ok(())
 }
 
