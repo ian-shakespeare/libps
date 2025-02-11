@@ -5,7 +5,7 @@ use dict_operators::*;
 use math_operators::*;
 use stack_operators::*;
 
-use crate::{interpreter::InterpreterState, Error, ErrorKind, Object};
+use crate::{Error, ErrorKind, Interpreter, Object};
 
 mod array_operators;
 mod dict_operators;
@@ -13,7 +13,7 @@ mod math_operators;
 mod stack_operators;
 
 pub fn system_dict() -> HashMap<String, Object> {
-    type KeyOperatorPair = (&'static str, fn(&mut InterpreterState) -> crate::Result<()>);
+    type KeyOperatorPair = (&'static str, fn(&mut Interpreter) -> crate::Result<()>);
 
     let ops: Vec<KeyOperatorPair> = vec![
         ("dup", dup),
@@ -82,12 +82,17 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("putinterval", putinterval),
         ("astore", astore),
         ("aload", aload),
+        ("forall", forall),
         ("packedarray", packedarray),
         ("setpacking", setpacking),
         ("currentpacking", currentpacking),
         ("dict", dict),
         ("<<", mark),
         (">>", enddict),
+        ("maxlength", maxlength),
+        ("begin", begin),
+        ("end", end),
+        ("def", def),
     ];
 
     let mut system_dict = HashMap::new();

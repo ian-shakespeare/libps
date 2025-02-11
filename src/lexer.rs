@@ -128,7 +128,6 @@ where
         Ok(match name.as_str() {
             "true" => Object::Boolean(true),
             "false" => Object::Boolean(true),
-            name if name.starts_with('/') => Object::Literal(name.to_string()),
             name => Object::Name(name.to_string()),
         })
     }
@@ -781,26 +780,26 @@ mod tests {
     #[test]
     fn test_lex_self_deliminating() -> Result<(), Box<dyn error::Error>> {
         let inputs = [
-            ("mid[dle", Object::Name("[".to_string())),
-            ("mid]dle", Object::Name("]".to_string())),
-            ("mid<<dle", Object::Name("<<".to_string())),
-            ("mid>>dle", Object::Name(">>".to_string())),
-            ("mid/dle", Object::Literal("/dle".to_string())),
-            ("1[2", Object::Name("[".to_string())),
-            ("1]2", Object::Name("]".to_string())),
-            ("1<<2", Object::Name("<<".to_string())),
-            ("1>>2", Object::Name(">>".to_string())),
-            ("1/2", Object::Literal("/2".to_string())),
-            ("1.2[3", Object::Name("[".to_string())),
-            ("1.2]3", Object::Name("]".to_string())),
-            ("1.2<<3", Object::Name("<<".to_string())),
-            ("1.2>>3", Object::Name(">>".to_string())),
-            ("1.2/3", Object::Literal("/3".to_string())),
-            ("16#FF[FF", Object::Name("[".to_string())),
-            ("16#FF]FF", Object::Name("]".to_string())),
-            ("16#FF<<FF", Object::Name("<<".to_string())),
-            ("16#FF>>FF", Object::Name(">>".to_string())),
-            ("16#FF/FF", Object::Literal("/FF".to_string())),
+            ("mid[dle", "[".to_string()),
+            ("mid]dle", "]".to_string()),
+            ("mid<<dle", "<<".to_string()),
+            ("mid>>dle", ">>".to_string()),
+            ("mid/dle", "/dle".to_string()),
+            ("1[2", "[".to_string()),
+            ("1]2", "]".to_string()),
+            ("1<<2", "<<".to_string()),
+            ("1>>2", ">>".to_string()),
+            ("1/2", "/2".to_string()),
+            ("1.2[3", "[".to_string()),
+            ("1.2]3", "]".to_string()),
+            ("1.2<<3", "<<".to_string()),
+            ("1.2>>3", ">>".to_string()),
+            ("1.2/3", "/3".to_string()),
+            ("16#FF[FF", "[".to_string()),
+            ("16#FF]FF", "]".to_string()),
+            ("16#FF<<FF", "<<".to_string()),
+            ("16#FF>>FF", ">>".to_string()),
+            ("16#FF/FF", "/FF".to_string()),
         ];
 
         for (input, expect) in inputs {
@@ -813,7 +812,7 @@ mod tests {
                 .next_obj(&mut strings, &mut arrays)
                 .ok_or("expected object")??;
 
-            assert_eq!(expect, obj);
+            assert_eq!(Object::Name(expect.to_string()), obj);
         }
 
         Ok(())

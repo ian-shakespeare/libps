@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{interpreter::InterpreterState, Error, ErrorKind};
+use crate::{Error, ErrorKind, Interpreter};
 
 #[derive(Clone, Debug)]
 pub enum Object {
@@ -12,9 +12,8 @@ pub enum Object {
     Procedure(usize),
     String(usize),
     Dictionary(usize),
-    Literal(String),
     Name(String),
-    Operator(fn(&mut InterpreterState) -> crate::Result<()>),
+    Operator(fn(&mut Interpreter) -> crate::Result<()>),
     File,
     Mark,
     Null,
@@ -68,10 +67,6 @@ impl PartialEq for Object {
                 Self::String(other_value) => value == other_value,
                 _ => false,
             },
-            Self::Literal(value) => match other {
-                Self::Literal(other_value) => value == other_value,
-                _ => false,
-            },
             Self::Name(value) => match other {
                 Self::Name(other_value) => value == other_value,
                 _ => false,
@@ -85,12 +80,12 @@ impl PartialEq for Object {
 impl Eq for Object {}
 
 impl Object {
-    pub fn to_string(&self, state: &InterpreterState) -> crate::Result<String> {
+    pub fn to_string(&self, interpreter: &Interpreter) -> crate::Result<String> {
         match self {
             Object::Integer(i) => Ok(i.to_string()),
             Object::Real(r) => Ok(r.to_string()),
-            Object::String(idx) => Ok(state.strings.get(*idx)?.inner.clone()),
-            Object::Name(name) | Object::Literal(name) => Ok(name.to_string()),
+            Object::String(idx) => Ok(interpreter.strings.get(*idx)?.inner.clone()),
+            Object::Name(name) => Ok(name.to_string()),
             _ => Err(Error::new(
                 ErrorKind::Unregistered,
                 "cannot stringify object",
@@ -98,26 +93,54 @@ impl Object {
         }
     }
 
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Integer(..) => "integer",
+            Self::Real(..) => "real",
+            Self::Boolean(..) => "boolean",
+            Self::Name(..) => "name",
+            Self::PackedArray(..) => "packedarray",
+            Self::Array(..) => "array",
+            Self::Procedure(..) => "procedure",
+            Self::String(..) => "string",
+            Self::Dictionary(..) => "dictionary",
+            Self::Operator(..) => "operator",
+            Self::File => "file",
+            Self::Mark => "mark",
+            Self::Null => "null",
+            Self::Save => "save",
+            Self::FontId => "fontid",
+            Self::GState => "gstate",
+        }
+    }
+
     pub fn is_int(&self) -> bool {
-        matches!(self, Self::Integer(_))
+        matches!(self, Self::Integer(..))
     }
 
     pub fn is_real(&self) -> bool {
-        matches!(self, Self::Real(_))
+        matches!(self, Self::Real(..))
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self, Self::String(_))
+        matches!(self, Self::String(..))
     }
 
     pub fn is_mark(&self) -> bool {
         matches!(self, Self::Mark)
     }
 
+    pub fn is_procedure(&self) -> bool {
+        matches!(self, Self::Procedure(..))
+    }
+
     pub fn into_int(&self) -> crate::Result<i32> {
         match self {
             Self::Integer(i) => Ok(*i),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
+            _ => Err(Error::new(
+                ErrorKind::TypeCheck,
+                format!("expected integer, received {}", self.name()),
+            )),
         }
     }
 
@@ -125,7 +148,10 @@ impl Object {
         match self {
             Self::Integer(i) => Ok(f64::from(*i)),
             Self::Real(r) => Ok(*r),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+            _ => Err(Error::new(
+                ErrorKind::TypeCheck,
+                format!("expected real, received {}", self.name()),
+            )),
         }
     }
 }

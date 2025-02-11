@@ -3,6 +3,7 @@ use std::fmt;
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ErrorKind {
     DictFull,
+    DictStackUnderflow,
     InvalidAccess,
     IoError,
     LimitCheck,
@@ -21,6 +22,7 @@ impl From<ErrorKind> for &'static str {
     fn from(value: ErrorKind) -> Self {
         match value {
             ErrorKind::DictFull => "dictfull",
+            ErrorKind::DictStackUnderflow => "dictstackunderflow",
             ErrorKind::InvalidAccess => "invalidaccess",
             ErrorKind::IoError => "ioerror",
             ErrorKind::LimitCheck => "limitcheck",
