@@ -104,14 +104,72 @@ pub fn def(interpreter: &mut Interpreter) -> crate::Result<()> {
 mod tests {
     use std::error;
 
+    use super::*;
+
     #[test]
     fn test_dict() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Integer(5));
+        dict(&mut interpreter)?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+
+        let dict = interpreter.pop_dict()?;
+        assert_eq!(0, dict.len());
+        assert_eq!(5, dict.capacity());
+
         Ok(())
     }
 
     #[test]
+    fn test_dict_rangecheck() {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Integer(-1));
+
+        let result = dict(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_dict_typecheck() {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Boolean(true));
+
+        let result = dict(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_dict_underflow() {
+        let mut interpreter = Interpreter::default();
+
+        let result = dict(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
     fn test_enddict() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Mark);
+        enddict(&mut interpreter)?;
+
+        let dict = interpreter.pop_dict()?;
+        assert_eq!(0, dict.len());
+        assert_eq!(0, dict.capacity());
+
         Ok(())
+    }
+
+    #[test]
+    fn test_enddict_unmatchedmark() {
+        let mut interpreter = Interpreter::default();
+
+        let result = enddict(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
