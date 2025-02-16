@@ -213,6 +213,22 @@ impl Interpreter {
         Err(Error::new(ErrorKind::Undefined, name))
     }
 
+    pub fn search_mut(&mut self, name: String) -> crate::Result<&mut Object> {
+        let dict = self.dict_stack.iter().rev().find(|idx| {
+            self.dicts
+                .get(**idx)
+                .is_ok_and(|dict| dict.value().contains_key(&name))
+        });
+
+        match dict {
+            Some(idx) => {
+                let obj = self.dicts.get_mut(*idx)?.get_mut(name)?;
+                Ok(obj)
+            },
+            None => Err(Error::new(ErrorKind::Undefined, name)),
+        }
+    }
+
     pub fn push(&mut self, obj: Object) {
         self.operand_stack.push(obj);
     }

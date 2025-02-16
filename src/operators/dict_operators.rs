@@ -100,6 +100,26 @@ pub fn def(interpreter: &mut Interpreter) -> crate::Result<()> {
     Ok(())
 }
 
+pub fn load(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let key = interpreter.pop_literal()?.to_string(interpreter)?;
+
+    let obj = interpreter.search(key)?;
+
+    interpreter.push(obj.clone());
+
+    Ok(())
+}
+
+pub fn store(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let value = interpreter.pop()?;
+    let key = interpreter.pop_literal()?.to_string(interpreter)?;
+
+    let obj = interpreter.search_mut(key)?;
+    *obj = value;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::error;
@@ -174,21 +194,61 @@ mod tests {
 
     #[test]
     fn test_maxlength() -> Result<(), Box<dyn error::Error>> {
-        Ok(())
+        Err("not implemented".into())
     }
 
     #[test]
     fn test_begin() -> Result<(), Box<dyn error::Error>> {
-        Ok(())
+        Err("not implemented".into())
     }
 
     #[test]
     fn test_end() -> Result<(), Box<dyn error::Error>> {
-        Ok(())
+        Err("not implemented".into())
     }
 
     #[test]
     fn test_def() -> Result<(), Box<dyn error::Error>> {
+        Err("not implemented".into())
+    }
+
+    #[test]
+    fn test_load() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.dict_stack.push(idx);
+        interpreter.push(Object::Name("/key".to_string()));
+        load(&mut interpreter)?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+
+        let i = interpreter.pop_int()?;
+        assert_eq!(1, i);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_store() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.dict_stack.push(idx);
+
+        interpreter.push(Object::Name("/key".to_string()));
+        interpreter.push(Object::Integer(2));
+        store(&mut interpreter)?;
+
+        assert_eq!(0, interpreter.operand_stack.len());
+
+        let val = interpreter.dicts.get(idx)?.get("/key".to_string())?;
+        assert_eq!(Object::Integer(2), val.clone());
+
         Ok(())
     }
 }

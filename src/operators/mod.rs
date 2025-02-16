@@ -93,6 +93,8 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("begin", begin),
         ("end", end),
         ("def", def),
+        ("load", load),
+        ("store", store),
     ];
 
     let mut system_dict = HashMap::new();
