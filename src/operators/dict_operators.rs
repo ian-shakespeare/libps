@@ -251,4 +251,6 @@ mod tests {
 
         Ok(())
     }
+
+    // TODO: Check for perms when loading and storing
 }
