@@ -201,6 +201,19 @@ impl Interpreter {
         }
     }
 
+    pub fn stringify(&self, obj: &Object) -> crate::Result<String> {
+        match obj {
+            Object::Integer(i) => Ok(i.to_string()),
+            Object::Real(r) => Ok(r.to_string()),
+            Object::String(idx) => Ok(self.strings.get(*idx)?.value().to_string()),
+            Object::Name(name) => Ok(name.to_string()),
+            _ => Err(Error::new(
+                ErrorKind::Unregistered,
+                "cannot stringify object",
+            )),
+        }
+    }
+
     pub fn search(&self, name: String) -> crate::Result<&Object> {
         for dict_idx in self.dict_stack.iter().rev() {
             if let Ok(dict) = self.dicts.get(*dict_idx) {

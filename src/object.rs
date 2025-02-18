@@ -80,19 +80,6 @@ impl PartialEq for Object {
 impl Eq for Object {}
 
 impl Object {
-    pub fn to_string(&self, interpreter: &Interpreter) -> crate::Result<String> {
-        match self {
-            Object::Integer(i) => Ok(i.to_string()),
-            Object::Real(r) => Ok(r.to_string()),
-            Object::String(idx) => Ok(interpreter.strings.get(*idx)?.inner.clone()),
-            Object::Name(name) => Ok(name.to_string()),
-            _ => Err(Error::new(
-                ErrorKind::Unregistered,
-                "cannot stringify object",
-            )),
-        }
-    }
-
     pub fn name(&self) -> &str {
         match self {
             Self::Integer(..) => "integer",
@@ -152,6 +139,16 @@ impl Object {
                 ErrorKind::TypeCheck,
                 format!("expected real, received {}", self.name()),
             )),
+        }
+    }
+
+    pub fn into_usize(&self) -> crate::Result<usize> {
+        match self {
+            Self::Integer(i) => match (*i).try_into() {
+                Ok(u) => Ok(u),
+                Err(_) => Err(Error::from(ErrorKind::RangeCheck)),
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected usize")),
         }
     }
 }

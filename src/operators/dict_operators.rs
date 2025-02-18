@@ -33,7 +33,7 @@ pub fn enddict(interpreter: &mut Interpreter) -> crate::Result<()> {
             return Err(Error::from(ErrorKind::RangeCheck));
         }
 
-        let key = key.to_string(interpreter)?;
+        let key = interpreter.stringify(&key)?;
 
         dict.insert(key, value);
     }
@@ -82,7 +82,8 @@ pub fn end(interpreter: &mut Interpreter) -> crate::Result<()> {
 
 pub fn def(interpreter: &mut Interpreter) -> crate::Result<()> {
     let value = interpreter.pop()?;
-    let key = interpreter.pop_literal()?.to_string(interpreter)?;
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
 
     let dict_idx = interpreter
         .dict_stack
@@ -101,7 +102,8 @@ pub fn def(interpreter: &mut Interpreter) -> crate::Result<()> {
 }
 
 pub fn load(interpreter: &mut Interpreter) -> crate::Result<()> {
-    let key = interpreter.pop_literal()?.to_string(interpreter)?;
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
 
     let obj = interpreter.search(key)?;
 
@@ -112,7 +114,8 @@ pub fn load(interpreter: &mut Interpreter) -> crate::Result<()> {
 
 pub fn store(interpreter: &mut Interpreter) -> crate::Result<()> {
     let value = interpreter.pop()?;
-    let key = interpreter.pop_literal()?.to_string(interpreter)?;
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
 
     let obj = interpreter.search_mut(key)?;
     *obj = value;

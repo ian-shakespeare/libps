@@ -71,7 +71,7 @@ pub fn length(interpreter: &mut Interpreter) -> crate::Result<()> {
 }
 
 pub fn get(interpreter: &mut Interpreter) -> crate::Result<()> {
-    let index = interpreter.pop_usize()?;
+    let key = interpreter.pop_literal()?;
     let obj = interpreter.pop()?;
 
     let obj = match obj {
@@ -82,9 +82,25 @@ pub fn get(interpreter: &mut Interpreter) -> crate::Result<()> {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
+            let index = key.into_usize()?;
+
             match arr.value().get(index) {
                 Some(obj) => Ok(obj.clone()),
                 None => Err(Error::from(ErrorKind::RangeCheck)),
+            }
+        },
+        Object::Dictionary(idx) => {
+            let dict = interpreter.dicts.get(idx)?;
+
+            if !dict.access().is_readable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            let key = interpreter.stringify(&key)?;
+
+            match dict.value().get(&key) {
+                Some(obj) => Ok(obj.clone()),
+                None => Err(Error::new(ErrorKind::Undefined, key)),
             }
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
@@ -97,20 +113,42 @@ pub fn get(interpreter: &mut Interpreter) -> crate::Result<()> {
 
 pub fn put(interpreter: &mut Interpreter) -> crate::Result<()> {
     let value = interpreter.pop()?;
-    let index = interpreter.pop_usize()?;
-    let arr = interpreter.pop_array_mut()?;
+    let key = interpreter.pop_literal()?;
+    let obj = interpreter.pop()?;
 
-    if !arr.access().is_writeable() {
-        return Err(Error::from(ErrorKind::InvalidAccess));
+    match obj {
+        Object::Array(idx) => {
+            let arr = interpreter.arrays.get_mut(idx)?;
+
+            if !arr.access().is_writeable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            let index = key.into_usize()?;
+
+            let obj = arr
+                .value_mut()
+                .get_mut(index)
+                .ok_or(Error::from(ErrorKind::RangeCheck))?;
+            *obj = value;
+
+            Ok(())
+        },
+        Object::Dictionary(idx) => {
+            let key = interpreter.stringify(&key)?;
+            let dict = interpreter.dicts.get_mut(idx)?;
+
+            if !dict.access().is_writeable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            let obj = dict.get_mut(key)?;
+            *obj = value;
+
+            Ok(())
+        },
+        _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }
-
-    let Some(obj) = arr.value_mut().get_mut(index) else {
-        return Err(Error::from(ErrorKind::RangeCheck));
-    };
-
-    *obj = value;
-
-    Ok(())
 }
 
 pub fn getinterval(interpreter: &mut Interpreter) -> crate::Result<()> {
@@ -278,7 +316,7 @@ pub fn currentpacking(interpreter: &mut Interpreter) -> crate::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::error;
+    use std::{collections::HashMap, error};
 
     use super::*;
 
@@ -424,6 +462,17 @@ mod tests {
     }
 
     #[test]
+    fn test_get_dictionary() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("<</key 1>> /key get".chars().into())?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(Object::Integer(1), interpreter.pop()?);
+
+        Ok(())
+    }
+
+    #[test]
     fn test_get_rangecheck() {
         let inputs = ["[ 1 2 3 ] -1 get", "[ 1 2 3 ] 3 get", "[ ] 0 get"];
 
@@ -447,6 +496,15 @@ mod tests {
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
+    }
+
+    #[test]
+    fn test_get_undefined() {
+        let mut interpreter = Interpreter::default();
+
+        let result = interpreter.evaluate("<</key 1>> /otherKey get".chars().into());
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::Undefined, result.unwrap_err().kind());
     }
 
     #[test]
@@ -479,6 +537,25 @@ mod tests {
     }
 
     #[test]
+    fn test_put_dictionary() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+
+        dict.insert("key".to_string(), Object::Integer(1));
+        let dict_idx = interpreter.dicts.insert(dict.into());
+        interpreter.operand_stack.push(Object::Dictionary(dict_idx));
+
+        interpreter.evaluate("/key 2 put".chars().into())?;
+
+        assert_eq!(0, interpreter.operand_stack.len());
+
+        let dict = interpreter.dicts.get(dict_idx)?;
+        assert_eq!(Some(Object::Integer(2)), dict.value().get("key").cloned());
+
+        Ok(())
+    }
+
+    #[test]
     fn test_put_rangecheck() {
         let inputs = [
             "[ 1 2 3 ] -1 3.14 put",
@@ -506,6 +583,15 @@ mod tests {
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
+    }
+
+    #[test]
+    fn test_put_undefined() {
+        let mut interpreter = Interpreter::default();
+
+        let result = interpreter.evaluate("<</key 1>> /otherKey 2 put".chars().into());
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::Undefined, result.unwrap_err().kind());
     }
 
     #[test]
