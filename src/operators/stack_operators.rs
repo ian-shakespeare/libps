@@ -78,6 +78,22 @@ pub fn copy(interpreter: &mut Interpreter) -> crate::Result<()> {
 
             Ok(())
         },
+        Object::Dictionary(idx) => {
+            let source = interpreter.pop_dict()?.value().clone();
+            let destination = interpreter.dicts.get_mut(idx)?;
+
+            if destination.capacity() < source.len() {
+                return Err(Error::from(ErrorKind::RangeCheck));
+            }
+
+            for (key, value) in source {
+                destination.insert(key, value)?;
+            }
+
+            interpreter.push(Object::Dictionary(idx));
+
+            Ok(())
+        },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected integer")),
     }
 }
@@ -315,6 +331,19 @@ mod tests {
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_copy_dictionary() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("<</key 1>> 1 dict copy".chars().into())?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+
+        let dict = interpreter.pop_dict()?;
+        assert_eq!(Object::Integer(1), dict.get("key".to_string()).cloned()?);
+
+        Ok(())
     }
 
     #[test]

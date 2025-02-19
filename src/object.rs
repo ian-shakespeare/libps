@@ -332,6 +332,10 @@ impl PostScriptDictionary {
     pub fn value(&self) -> &HashMap<String, Object> {
         &self.inner
     }
+
+    pub fn value_mut(&mut self) -> &mut HashMap<String, Object> {
+        &mut self.inner
+    }
 }
 
 pub struct PostScriptString {

@@ -83,7 +83,7 @@ impl Interpreter {
                     return Ok(());
                 }
 
-                let obj = self.search(name)?.clone();
+                let obj = self.find(name)?.clone();
 
                 self.execute_object(obj)
             },
@@ -214,7 +214,17 @@ impl Interpreter {
         }
     }
 
-    pub fn search(&self, name: String) -> crate::Result<&Object> {
+    pub fn find_dict(&self, name: String) -> crate::Result<usize> {
+        for dict_idx in self.dict_stack.iter().rev() {
+            if self.dicts.get(*dict_idx)?.get(name.clone()).is_ok() {
+                return Ok(*dict_idx);
+            }
+        }
+
+        Err(Error::new(ErrorKind::Undefined, name))
+    }
+
+    pub fn find(&self, name: String) -> crate::Result<&Object> {
         for dict_idx in self.dict_stack.iter().rev() {
             if let Ok(dict) = self.dicts.get(*dict_idx) {
                 if let Ok(obj) = dict.get(name.clone()) {
@@ -226,7 +236,7 @@ impl Interpreter {
         Err(Error::new(ErrorKind::Undefined, name))
     }
 
-    pub fn search_mut(&mut self, name: String) -> crate::Result<&mut Object> {
+    pub fn find_mut(&mut self, name: String) -> crate::Result<&mut Object> {
         let dict = self.dict_stack.iter().rev().find(|idx| {
             self.dicts
                 .get(**idx)
@@ -257,7 +267,7 @@ impl Interpreter {
         let obj = self.pop_literal()?;
 
         if let Object::Name(name) = obj {
-            return self.search(name).cloned();
+            return self.find(name).cloned();
         }
 
         Ok(obj)
@@ -311,6 +321,13 @@ impl Interpreter {
     pub fn pop_dict(&mut self) -> crate::Result<&PostScriptDictionary> {
         match self.pop()? {
             Object::Dictionary(idx) => Ok(self.dicts.get(idx)?),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
+        }
+    }
+
+    pub fn pop_dict_mut(&mut self) -> crate::Result<&mut PostScriptDictionary> {
+        match self.pop()? {
+            Object::Dictionary(idx) => Ok(self.dicts.get_mut(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }

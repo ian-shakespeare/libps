@@ -95,6 +95,9 @@ pub fn system_dict() -> HashMap<String, Object> {
         ("def", def),
         ("load", load),
         ("store", store),
+        ("undef", undef),
+        ("known", known),
+        ("where", wheredef),
     ];
 
     let mut system_dict = HashMap::new();

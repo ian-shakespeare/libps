@@ -105,7 +105,7 @@ pub fn load(interpreter: &mut Interpreter) -> crate::Result<()> {
     let key_obj = interpreter.pop_literal()?;
     let key = interpreter.stringify(&key_obj)?;
 
-    let obj = interpreter.search(key)?;
+    let obj = interpreter.find(key)?;
 
     interpreter.push(obj.clone());
 
@@ -117,8 +117,56 @@ pub fn store(interpreter: &mut Interpreter) -> crate::Result<()> {
     let key_obj = interpreter.pop_literal()?;
     let key = interpreter.stringify(&key_obj)?;
 
-    let obj = interpreter.search_mut(key)?;
+    let obj = interpreter.find_mut(key)?;
     *obj = value;
+
+    Ok(())
+}
+
+pub fn undef(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
+    let dict = interpreter.pop_dict_mut()?;
+
+    if !dict.access().is_writeable() {
+        return Err(Error::from(ErrorKind::InvalidAccess));
+    }
+
+    match dict.value_mut().remove(&key) {
+        Some(..) => Ok(()),
+        None => Err(Error::new(ErrorKind::Undefined, key)),
+    }
+}
+
+pub fn known(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
+    let dict = interpreter.pop_dict()?;
+
+    if !dict.access().is_readable() {
+        return Err(Error::from(ErrorKind::InvalidAccess));
+    }
+
+    let exists = dict.value().contains_key(&key);
+
+    interpreter.push(Object::Boolean(exists));
+
+    Ok(())
+}
+
+pub fn wheredef(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let key_obj = interpreter.pop_literal()?;
+    let key = interpreter.stringify(&key_obj)?;
+
+    match interpreter.find_dict(key) {
+        Ok(idx) => {
+            interpreter.push(Object::Dictionary(idx));
+            interpreter.push(Object::Boolean(true));
+        },
+        Err(..) => {
+            interpreter.push(Object::Boolean(false));
+        },
+    }
 
     Ok(())
 }
@@ -256,4 +304,122 @@ mod tests {
     }
 
     // TODO: Check for perms when loading and storing
+
+    #[test]
+    fn test_undef() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.operand_stack.push(Object::Dictionary(idx));
+        interpreter
+            .operand_stack
+            .push(Object::Name("/key".to_string()));
+
+        undef(&mut interpreter)?;
+        assert_eq!(0, interpreter.operand_stack.len());
+
+        let dict = interpreter.dicts.get(idx)?;
+        assert_eq!(None, dict.value().get("/key"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_undef_undefined() {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.operand_stack.push(Object::Dictionary(idx));
+        interpreter
+            .operand_stack
+            .push(Object::Name("/otherKey".to_string()));
+
+        let result = undef(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::Undefined, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_undef_underflow() {
+        let mut interpreter = Interpreter::default();
+        interpreter
+            .operand_stack
+            .push(Object::Name("/otherKey".to_string()));
+
+        let result = undef(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_known() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.operand_stack.push(Object::Dictionary(idx));
+        interpreter
+            .operand_stack
+            .push(Object::Name("/key".to_string()));
+
+        known(&mut interpreter)?;
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(Object::Boolean(true), interpreter.pop()?);
+
+        interpreter.operand_stack.push(Object::Dictionary(idx));
+        interpreter
+            .operand_stack
+            .push(Object::Name("/otherKey".to_string()));
+
+        known(&mut interpreter)?;
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(Object::Boolean(false), interpreter.pop()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_known_underflow() {
+        let mut interpreter = Interpreter::default();
+        interpreter
+            .operand_stack
+            .push(Object::Name("/otherKey".to_string()));
+
+        let result = known(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_where() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let mut dict = HashMap::new();
+        dict.insert("/key".to_string(), Object::Integer(1));
+
+        let idx = interpreter.dicts.insert(dict.into());
+        interpreter.dict_stack.push(idx);
+        interpreter
+            .operand_stack
+            .push(Object::Name("/key".to_string()));
+
+        wheredef(&mut interpreter)?;
+        assert_eq!(2, interpreter.operand_stack.len());
+        assert_eq!(Object::Boolean(true), interpreter.pop()?);
+        assert!(matches!(interpreter.pop()?, Object::Dictionary(..)));
+
+        interpreter
+            .operand_stack
+            .push(Object::Name("/otherKey".to_string()));
+
+        wheredef(&mut interpreter)?;
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(Object::Boolean(false), interpreter.pop()?);
+
+        Ok(())
+    }
 }

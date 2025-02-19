@@ -274,18 +274,37 @@ pub fn aload(interpreter: &mut Interpreter) -> crate::Result<()> {
 
 pub fn forall(interpreter: &mut Interpreter) -> crate::Result<()> {
     let proc = interpreter.pop()?;
-    let arr = interpreter.pop_array()?;
+    let obj = interpreter.pop()?;
 
     if !proc.is_procedure() {
         return Err(Error::new(ErrorKind::TypeCheck, "expected procedure"));
     }
 
-    for obj in arr.value().clone() {
-        interpreter.push(obj);
-        interpreter.execute_object(proc.clone())?;
-    }
+    match obj {
+        Object::Array(idx) => {
+            let arr = interpreter.arrays.get(idx)?;
 
-    Ok(())
+            for obj in arr.value().clone() {
+                interpreter.push(obj);
+                interpreter.execute_object(proc.clone())?;
+            }
+
+            Ok(())
+        },
+        Object::Dictionary(idx) => {
+            let dict = interpreter.dicts.get(idx)?;
+
+            for (key, value) in dict.value().clone() {
+                interpreter.push(Object::Name(format!("/{key}")));
+                interpreter.push(value);
+
+                interpreter.execute_object(proc.clone())?;
+            }
+
+            Ok(())
+        },
+        _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+    }
 }
 
 pub fn packedarray(interpreter: &mut Interpreter) -> crate::Result<()> {
@@ -829,6 +848,20 @@ mod tests {
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(58)), interpreter.operand_stack.pop());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_forall_dictionary() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        interpreter.evaluate("<</abc 1 /xyz 2>> {} forall".chars().into())?;
+
+        assert_eq!(4, interpreter.operand_stack.len());
+        assert!(matches!(interpreter.pop()?, Object::Integer(..)));
+        assert!(matches!(interpreter.pop_literal()?, Object::Name(..)));
+        assert!(matches!(interpreter.pop()?, Object::Integer(..)));
+        assert!(matches!(interpreter.pop_literal()?, Object::Name(..)));
 
         Ok(())
     }
