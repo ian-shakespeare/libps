@@ -1,18 +1,13 @@
 use std::collections::HashMap;
 
-use crate::{
-    object::{Access, PostScriptDictionary},
-    Error, ErrorKind, Interpreter, Object,
-};
+use crate::{Error, ErrorKind, Interpreter, Object};
 
 use super::usize_to_i32;
 
 pub fn dict(interpreter: &mut Interpreter) -> crate::Result<()> {
     let capacity = interpreter.pop_usize()?;
 
-    let idx = interpreter
-        .dicts
-        .insert(PostScriptDictionary::new(capacity, Access::default()));
+    let idx = interpreter.mem.insert(HashMap::with_capacity(capacity));
 
     interpreter.push(Object::Dictionary(idx));
 
@@ -38,7 +33,7 @@ pub fn enddict(interpreter: &mut Interpreter) -> crate::Result<()> {
         dict.insert(key, value);
     }
 
-    let idx = interpreter.dicts.insert(dict.into());
+    let idx = interpreter.mem.insert(dict);
     interpreter.push(Object::Dictionary(idx));
 
     Ok(())
@@ -47,11 +42,13 @@ pub fn enddict(interpreter: &mut Interpreter) -> crate::Result<()> {
 pub fn maxlength(interpreter: &mut Interpreter) -> crate::Result<()> {
     let dict = interpreter.pop_dict()?;
 
-    if !dict.access().is_readable() {
+    if !dict.access.is_readable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let capacity = usize_to_i32(dict.capacity())?;
+    let capacity = dict.len() + 1;
+
+    let capacity = usize_to_i32(capacity)?;
 
     interpreter.push(Object::Integer(capacity));
 
@@ -90,13 +87,13 @@ pub fn def(interpreter: &mut Interpreter) -> crate::Result<()> {
         .last()
         .ok_or(Error::from(ErrorKind::LimitCheck))?;
 
-    let dict = interpreter.dicts.get_mut(*dict_idx)?;
+    let dict = interpreter.mem.get_mut(*dict_idx)?;
 
-    if !dict.access().is_writeable() {
+    if !dict.access.is_writeable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    dict.insert(key, value)?;
+    dict.dict_mut()?.insert(key, value);
 
     Ok(())
 }
@@ -128,11 +125,11 @@ pub fn undef(interpreter: &mut Interpreter) -> crate::Result<()> {
     let key = interpreter.stringify(&key_obj)?;
     let dict = interpreter.pop_dict_mut()?;
 
-    if !dict.access().is_writeable() {
+    if !dict.access.is_writeable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    match dict.value_mut().remove(&key) {
+    match dict.dict_mut()?.remove(&key) {
         Some(..) => Ok(()),
         None => Err(Error::new(ErrorKind::Undefined, key)),
     }
@@ -143,11 +140,11 @@ pub fn known(interpreter: &mut Interpreter) -> crate::Result<()> {
     let key = interpreter.stringify(&key_obj)?;
     let dict = interpreter.pop_dict()?;
 
-    if !dict.access().is_readable() {
+    if !dict.access.is_readable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let exists = dict.value().contains_key(&key);
+    let exists = dict.dict()?.contains_key(&key);
 
     interpreter.push(Object::Boolean(exists));
 
@@ -187,7 +184,6 @@ mod tests {
 
         let dict = interpreter.pop_dict()?;
         assert_eq!(0, dict.len());
-        assert_eq!(5, dict.capacity());
 
         Ok(())
     }
@@ -229,7 +225,7 @@ mod tests {
 
         let dict = interpreter.pop_dict()?;
         assert_eq!(0, dict.len());
-        assert_eq!(0, dict.capacity());
+        assert_eq!(0, dict.dict()?.capacity());
 
         Ok(())
     }
@@ -269,7 +265,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.dict_stack.push(idx);
         interpreter.push(Object::Name("/key".to_string()));
         load(&mut interpreter)?;
@@ -288,7 +284,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.dict_stack.push(idx);
 
         interpreter.push(Object::Name("/key".to_string()));
@@ -297,7 +293,11 @@ mod tests {
 
         assert_eq!(0, interpreter.operand_stack.len());
 
-        let val = interpreter.dicts.get(idx)?.get("/key".to_string())?;
+        let val = interpreter
+            .mem
+            .get_dict(idx)?
+            .get("/key")
+            .ok_or("expected value")?;
         assert_eq!(Object::Integer(2), val.clone());
 
         Ok(())
@@ -311,7 +311,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.operand_stack.push(Object::Dictionary(idx));
         interpreter
             .operand_stack
@@ -320,8 +320,8 @@ mod tests {
         undef(&mut interpreter)?;
         assert_eq!(0, interpreter.operand_stack.len());
 
-        let dict = interpreter.dicts.get(idx)?;
-        assert_eq!(None, dict.value().get("/key"));
+        let dict = interpreter.mem.get_dict(idx)?;
+        assert_eq!(None, dict.get("/key"));
 
         Ok(())
     }
@@ -332,7 +332,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.operand_stack.push(Object::Dictionary(idx));
         interpreter
             .operand_stack
@@ -361,7 +361,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.operand_stack.push(Object::Dictionary(idx));
         interpreter
             .operand_stack
@@ -401,7 +401,7 @@ mod tests {
         let mut dict = HashMap::new();
         dict.insert("/key".to_string(), Object::Integer(1));
 
-        let idx = interpreter.dicts.insert(dict.into());
+        let idx = interpreter.mem.insert(dict);
         interpreter.dict_stack.push(idx);
         interpreter
             .operand_stack

@@ -194,7 +194,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -209,7 +209,7 @@ mod tests {
 
         for input in cases {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -222,7 +222,7 @@ mod tests {
 
         for input in cases {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -240,7 +240,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             let Some(Object::Real(value)) = interpreter.operand_stack.pop() else {
@@ -258,7 +258,7 @@ mod tests {
 
         for input in cases {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
@@ -271,7 +271,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn test_idiv_undefinedresult() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 0 idiv".chars().into());
+        let result = interpreter.evaluate("1 0 idiv".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
@@ -298,7 +298,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(
@@ -313,7 +313,7 @@ mod tests {
     #[test]
     fn test_imod_undefinedresult() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("2 0 imod".chars().into());
+        let result = interpreter.evaluate("2 0 imod".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::UndefinedResult, result.unwrap_err().kind());
@@ -331,7 +331,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -352,7 +352,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -374,7 +374,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -394,7 +394,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -423,7 +423,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -452,7 +452,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -482,7 +482,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -511,7 +511,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(expect), interpreter.operand_stack.pop());
@@ -533,7 +533,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -559,7 +559,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert_eq!(Some(Object::Real(expect)), interpreter.operand_stack.pop());
@@ -579,7 +579,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -601,7 +601,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -629,7 +629,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -651,7 +651,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -673,7 +673,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
 
@@ -688,7 +688,7 @@ mod tests {
     fn test_rand() -> Result<(), Box<dyn error::Error>> {
         for _ in 0..5 {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate("rand".chars().into())?;
+            interpreter.evaluate("rand".chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             assert!(interpreter.pop_int()? >= 0);
@@ -700,16 +700,16 @@ mod tests {
     #[test]
     fn test_srand() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("100 srand rand".chars().into())?;
+        interpreter.evaluate("100 srand rand".chars())?;
         let initial_value = interpreter.pop_int()?;
 
         interpreter.operand_stack.clear();
-        interpreter.evaluate("1 srand rand".chars().into())?;
+        interpreter.evaluate("1 srand rand".chars())?;
         let intermediate_value = interpreter.pop_int()?;
         assert_ne!(initial_value, intermediate_value);
 
         interpreter.operand_stack.clear();
-        interpreter.evaluate("100 srand rand".chars().into())?;
+        interpreter.evaluate("100 srand rand".chars())?;
         let end_value = interpreter.pop_int()?;
         assert_eq!(initial_value, end_value);
 
@@ -719,7 +719,7 @@ mod tests {
     #[test]
     fn test_rrand() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 srand rrand".chars().into())?;
+        interpreter.evaluate("1 srand rrand".chars())?;
 
         assert_eq!(1, interpreter.pop_int()?);
 

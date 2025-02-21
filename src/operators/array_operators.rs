@@ -1,5 +1,5 @@
 use crate::{
-    object::{Access, PostScriptArray},
+    composite::{Access, Composite},
     Error, ErrorKind, Interpreter, Object,
 };
 
@@ -8,7 +8,7 @@ use super::usize_to_i32;
 pub fn array(interpreter: &mut Interpreter) -> crate::Result<()> {
     let len = interpreter.pop_usize()?;
 
-    let idx = interpreter.arrays.insert(vec![Object::Null; len].into());
+    let idx = interpreter.mem.insert(vec![Object::Null; len]);
 
     interpreter.push(Object::Array(idx));
 
@@ -32,7 +32,7 @@ pub fn endarray(interpreter: &mut Interpreter) -> crate::Result<()> {
     }
 
     arr.reverse();
-    let idx = interpreter.arrays.insert(arr.into());
+    let idx = interpreter.mem.insert(arr);
 
     interpreter.push(Object::Array(idx));
 
@@ -43,23 +43,14 @@ pub fn length(interpreter: &mut Interpreter) -> crate::Result<()> {
     let obj = interpreter.pop()?;
 
     let len = match obj {
-        Object::Array(idx) | Object::PackedArray(idx) => {
-            let arr = interpreter.arrays.get(idx)?;
+        Object::Array(idx) | Object::PackedArray(idx) | Object::Dictionary(idx) => {
+            let arr = interpreter.mem.get(idx)?;
 
-            if !arr.access().is_readable() {
+            if !arr.access.is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
             Ok(arr.len())
-        },
-        Object::Dictionary(idx) => {
-            let dict = interpreter.dicts.get(idx)?;
-
-            if !dict.access().is_readable() {
-                return Err(Error::from(ErrorKind::InvalidAccess));
-            }
-
-            Ok(dict.len())
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -76,29 +67,29 @@ pub fn get(interpreter: &mut Interpreter) -> crate::Result<()> {
 
     let obj = match obj {
         Object::Array(idx) | Object::PackedArray(idx) => {
-            let arr = interpreter.arrays.get(idx)?;
+            let arr = interpreter.mem.get(idx)?;
 
-            if arr.access().is_exec_only() {
+            if arr.access.is_exec_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
             let index = key.into_usize()?;
 
-            match arr.value().get(index) {
+            match arr.array()?.get(index) {
                 Some(obj) => Ok(obj.clone()),
                 None => Err(Error::from(ErrorKind::RangeCheck)),
             }
         },
         Object::Dictionary(idx) => {
-            let dict = interpreter.dicts.get(idx)?;
+            let dict = interpreter.mem.get(idx)?;
 
-            if !dict.access().is_readable() {
+            if !dict.access.is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
             let key = interpreter.stringify(&key)?;
 
-            match dict.value().get(&key) {
+            match dict.dict()?.get(&key) {
                 Some(obj) => Ok(obj.clone()),
                 None => Err(Error::new(ErrorKind::Undefined, key)),
             }
@@ -118,16 +109,16 @@ pub fn put(interpreter: &mut Interpreter) -> crate::Result<()> {
 
     match obj {
         Object::Array(idx) => {
-            let arr = interpreter.arrays.get_mut(idx)?;
+            let arr = interpreter.mem.get_mut(idx)?;
 
-            if !arr.access().is_writeable() {
+            if !arr.access.is_writeable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
             let index = key.into_usize()?;
 
             let obj = arr
-                .value_mut()
+                .array_mut()?
                 .get_mut(index)
                 .ok_or(Error::from(ErrorKind::RangeCheck))?;
             *obj = value;
@@ -136,14 +127,13 @@ pub fn put(interpreter: &mut Interpreter) -> crate::Result<()> {
         },
         Object::Dictionary(idx) => {
             let key = interpreter.stringify(&key)?;
-            let dict = interpreter.dicts.get_mut(idx)?;
+            let dict = interpreter.mem.get_mut(idx)?;
 
-            if !dict.access().is_writeable() {
+            if !dict.access.is_writeable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            let obj = dict.get_mut(key)?;
-            *obj = value;
+            dict.dict_mut()?.insert(key, value);
 
             Ok(())
         },
@@ -158,13 +148,13 @@ pub fn getinterval(interpreter: &mut Interpreter) -> crate::Result<()> {
 
     let arr = match obj {
         Object::Array(idx) | Object::PackedArray(idx) => {
-            let arr = interpreter.arrays.get(idx)?;
+            let arr = interpreter.mem.get(idx)?;
 
-            if !arr.access().is_readable() {
+            if !arr.access.is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok(arr.value().clone())
+            Ok(arr.array()?.clone())
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -181,7 +171,7 @@ pub fn getinterval(interpreter: &mut Interpreter) -> crate::Result<()> {
         subarr.push(obj.clone());
     }
 
-    let idx = interpreter.arrays.insert(subarr.into());
+    let idx = interpreter.mem.insert(subarr);
 
     interpreter.push(Object::Array(idx));
 
@@ -191,21 +181,21 @@ pub fn getinterval(interpreter: &mut Interpreter) -> crate::Result<()> {
 pub fn putinterval(interpreter: &mut Interpreter) -> crate::Result<()> {
     let source = interpreter.pop_array()?;
 
-    if !source.access().is_readable() {
+    if !source.access.is_readable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let source = source.value().clone();
+    let source = source.array()?.clone();
 
     let index = interpreter.pop_usize()?;
     let destination = interpreter.pop_array_mut()?;
 
-    if !destination.access().is_writeable() {
+    if !destination.access.is_writeable() {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
     for (offset, obj) in source.into_iter().enumerate() {
-        let Some(dest_obj) = destination.value_mut().get_mut(index + offset) else {
+        let Some(dest_obj) = destination.array_mut()?.get_mut(index + offset) else {
             return Err(Error::from(ErrorKind::RangeCheck));
         };
 
@@ -220,9 +210,9 @@ pub fn astore(interpreter: &mut Interpreter) -> crate::Result<()> {
         return Err(Error::new(ErrorKind::TypeCheck, "expected array"));
     };
 
-    let len = match interpreter.arrays.get(arr_idx) {
+    let len = match interpreter.mem.get(arr_idx) {
         Ok(composite) => {
-            if !composite.access().is_writeable() {
+            if !composite.access.is_writeable() {
                 Err(Error::from(ErrorKind::InvalidAccess))
             } else {
                 Ok(composite.len())
@@ -237,9 +227,9 @@ pub fn astore(interpreter: &mut Interpreter) -> crate::Result<()> {
         stored[i] = interpreter.pop()?;
     }
 
-    match interpreter.arrays.get_mut(arr_idx) {
+    match interpreter.mem.get_mut(arr_idx) {
         Ok(composite) => {
-            let existing = composite.value_mut();
+            let existing = composite.array_mut()?;
             *existing = stored;
             Ok(())
         },
@@ -252,13 +242,13 @@ pub fn aload(interpreter: &mut Interpreter) -> crate::Result<()> {
 
     let (idx, arr) = match obj {
         Object::Array(idx) | Object::PackedArray(idx) => {
-            let arr = interpreter.arrays.get(idx)?;
+            let arr = interpreter.mem.get(idx)?;
 
-            if !arr.access().is_readable() {
+            if !arr.access.is_readable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok((idx, arr.value().clone()))
+            Ok((idx, arr.array()?.clone()))
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
@@ -282,9 +272,9 @@ pub fn forall(interpreter: &mut Interpreter) -> crate::Result<()> {
 
     match obj {
         Object::Array(idx) => {
-            let arr = interpreter.arrays.get(idx)?;
+            let arr = interpreter.mem.get(idx)?;
 
-            for obj in arr.value().clone() {
+            for obj in arr.array()?.clone() {
                 interpreter.push(obj);
                 interpreter.execute_object(proc.clone())?;
             }
@@ -292,9 +282,9 @@ pub fn forall(interpreter: &mut Interpreter) -> crate::Result<()> {
             Ok(())
         },
         Object::Dictionary(idx) => {
-            let dict = interpreter.dicts.get(idx)?;
+            let dict = interpreter.mem.get(idx)?;
 
-            for (key, value) in dict.value().clone() {
+            for (key, value) in dict.dict()?.clone() {
                 interpreter.push(Object::Name(format!("/{key}")));
                 interpreter.push(value);
 
@@ -310,9 +300,10 @@ pub fn forall(interpreter: &mut Interpreter) -> crate::Result<()> {
 pub fn packedarray(interpreter: &mut Interpreter) -> crate::Result<()> {
     let size = interpreter.pop_usize()?;
 
-    let arr = PostScriptArray::new(vec![Object::Null; size], Access::ReadOnly);
+    let mut arr: Composite = vec![Object::Null; size].into();
+    arr.access = Access::ReadOnly;
 
-    let index = interpreter.arrays.insert(arr);
+    let index = interpreter.mem.insert(arr);
 
     interpreter.push(Object::PackedArray(index));
 
@@ -344,16 +335,16 @@ mod tests {
         for num in 0..5 {
             let input = format!("{num} array");
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
                 return Err("expected array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
+            let arr = interpreter.mem.get(arr_idx)?;
             assert_eq!(num, arr.len());
-            assert!(arr.value().iter().all(|obj| matches!(obj, Object::Null)));
+            assert!(arr.array()?.iter().all(|obj| matches!(obj, Object::Null)));
         }
 
         Ok(())
@@ -362,7 +353,7 @@ mod tests {
     #[test]
     fn test_array_rangecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("-1 array".chars().into());
+        let result = interpreter.evaluate("-1 array".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind())
@@ -371,7 +362,7 @@ mod tests {
     #[test]
     fn test_array_typeheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("(str) array".chars().into());
+        let result = interpreter.evaluate("(str) array".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind())
@@ -380,7 +371,7 @@ mod tests {
     #[test]
     fn test_array_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("array".chars().into());
+        let result = interpreter.evaluate("array".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind())
@@ -389,7 +380,7 @@ mod tests {
     #[test]
     fn test_startarray() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[".chars().into())?;
+        interpreter.evaluate("[".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
 
@@ -405,17 +396,17 @@ mod tests {
             let input = "[ ".to_string() + &format!("0 ").repeat(length) + "]";
 
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
                 return Err("expected array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
+            let arr = interpreter.mem.get(arr_idx)?;
             assert_eq!(length, arr.len());
             assert!(arr
-                .value()
+                .array()?
                 .iter()
                 .all(|obj| matches!(obj, Object::Integer(0))));
         }
@@ -426,7 +417,7 @@ mod tests {
     #[test]
     fn test_endarray_unmatchedmark() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("]".chars().into());
+        let result = interpreter.evaluate("]".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::UnmatchedMark, result.unwrap_err().kind());
@@ -435,7 +426,7 @@ mod tests {
     #[test]
     fn test_length() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[ 1 2 3 4 5 ] length".chars().into())?;
+        interpreter.evaluate("[ 1 2 3 4 5 ] length".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(5, interpreter.pop_int()?);
@@ -446,7 +437,7 @@ mod tests {
     #[test]
     fn test_length_packedarray() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("5 packedarray length".chars().into())?;
+        interpreter.evaluate("5 packedarray length".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(5, interpreter.pop_int()?);
@@ -459,7 +450,7 @@ mod tests {
         for i in 0..5 {
             let input = format!("[ 1 2 3 4 5 ] {i} get");
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             let received = interpreter.pop_int()?;
 
@@ -472,7 +463,7 @@ mod tests {
     #[test]
     fn test_get_packedarray() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 packedarray 0 get".chars().into())?;
+        interpreter.evaluate("1 packedarray 0 get".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert!(matches!(interpreter.pop()?, Object::Null));
@@ -483,7 +474,7 @@ mod tests {
     #[test]
     fn test_get_dictionary() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("<</key 1>> /key get".chars().into())?;
+        interpreter.evaluate("<</key 1>> /key get".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Object::Integer(1), interpreter.pop()?);
@@ -497,7 +488,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -510,7 +501,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -521,7 +512,7 @@ mod tests {
     fn test_get_undefined() {
         let mut interpreter = Interpreter::default();
 
-        let result = interpreter.evaluate("<</key 1>> /otherKey get".chars().into());
+        let result = interpreter.evaluate("<</key 1>> /otherKey get".chars());
         assert!(result.is_err());
         assert_eq!(ErrorKind::Undefined, result.unwrap_err().kind());
     }
@@ -532,7 +523,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -542,14 +533,23 @@ mod tests {
     #[test]
     fn test_put() -> Result<(), Box<dyn error::Error>> {
         for i in 0..5 {
-            let input = format!("5 array {i} 3.14 put");
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+
+            let arr = vec![Object::Null; 5];
+            let arr_idx = interpreter.mem.insert(arr);
+
+            interpreter.push(Object::Array(arr_idx));
+            interpreter.push(Object::Integer(i));
+            interpreter.push(Object::Real(3.14));
+
+            put(&mut interpreter)?;
 
             assert_eq!(0, interpreter.operand_stack.len());
 
-            let arr = interpreter.arrays.get(1)?;
-            assert_eq!(Some(Object::Real(3.14)), arr.value().get(i).cloned());
+            let arr = interpreter.mem.get_array(arr_idx)?;
+
+            let i: usize = i.try_into()?;
+            assert_eq!(Some(Object::Real(3.14)), arr.get(i).cloned());
         }
 
         Ok(())
@@ -561,15 +561,15 @@ mod tests {
         let mut dict = HashMap::new();
 
         dict.insert("key".to_string(), Object::Integer(1));
-        let dict_idx = interpreter.dicts.insert(dict.into());
+        let dict_idx = interpreter.mem.insert(dict);
         interpreter.operand_stack.push(Object::Dictionary(dict_idx));
 
-        interpreter.evaluate("/key 2 put".chars().into())?;
+        interpreter.evaluate("/key 2 put".chars())?;
 
         assert_eq!(0, interpreter.operand_stack.len());
 
-        let dict = interpreter.dicts.get(dict_idx)?;
-        assert_eq!(Some(Object::Integer(2)), dict.value().get("key").cloned());
+        let dict = interpreter.mem.get_dict(dict_idx)?;
+        assert_eq!(Some(Object::Integer(2)), dict.get("key").cloned());
 
         Ok(())
     }
@@ -584,7 +584,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -597,20 +597,11 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
         }
-    }
-
-    #[test]
-    fn test_put_undefined() {
-        let mut interpreter = Interpreter::default();
-
-        let result = interpreter.evaluate("<</key 1>> /otherKey 2 put".chars().into());
-        assert!(result.is_err());
-        assert_eq!(ErrorKind::Undefined, result.unwrap_err().kind());
     }
 
     #[test]
@@ -619,7 +610,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -629,14 +620,14 @@ mod tests {
     #[test]
     fn test_getinterval() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[ 1 2 3 4 5 ] 1 3 getinterval".chars().into())?;
+        interpreter.evaluate("[ 1 2 3 4 5 ] 1 3 getinterval".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
 
         let arr = interpreter.pop_array()?;
         assert_eq!(
             vec![Object::Integer(2), Object::Integer(3), Object::Integer(4)],
-            arr.value().clone()
+            arr.array()?.clone()
         );
 
         Ok(())
@@ -653,7 +644,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -670,7 +661,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -683,7 +674,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -693,9 +684,26 @@ mod tests {
     #[test]
     fn test_putinterval() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[ 1 2 3 4 5 ] 1 [ 6 7 8 ] putinterval".chars().into())?;
 
-        let arr = interpreter.arrays.get(1)?;
+        let arr1 = vec![
+            Object::Integer(1),
+            Object::Integer(2),
+            Object::Integer(3),
+            Object::Integer(4),
+            Object::Integer(5),
+        ];
+        let arr1_idx = interpreter.mem.insert(arr1);
+        interpreter.push(Object::Array(arr1_idx));
+
+        interpreter.push(Object::Integer(1));
+
+        let arr2 = vec![Object::Integer(6), Object::Integer(7), Object::Integer(8)];
+        let arr2_idx = interpreter.mem.insert(arr2);
+        interpreter.push(Object::Array(arr2_idx));
+
+        putinterval(&mut interpreter)?;
+
+        let arr = interpreter.mem.get_array(arr1_idx)?;
         assert_eq!(
             vec![
                 Object::Integer(1),
@@ -704,7 +712,7 @@ mod tests {
                 Object::Integer(8),
                 Object::Integer(5),
             ],
-            arr.value().clone()
+            arr.clone()
         );
 
         Ok(())
@@ -720,7 +728,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -737,7 +745,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -750,7 +758,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -760,14 +768,23 @@ mod tests {
     #[test]
     fn test_astore() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 3 4 5 3 array astore".chars().into())?;
+
+        for i in 1..=5 {
+            interpreter.push(Object::Integer(i));
+        }
+
+        let arr = vec![Object::Null; 3];
+        let arr_idx = interpreter.mem.insert(arr);
+        interpreter.push(Object::Array(arr_idx));
+
+        astore(&mut interpreter)?;
 
         assert_eq!(2, interpreter.operand_stack.len());
 
-        let arr = interpreter.arrays.get(1)?;
+        let arr = interpreter.mem.get_array(arr_idx)?;
         assert_eq!(
             vec![Object::Integer(3), Object::Integer(4), Object::Integer(5)],
-            arr.value().clone()
+            arr.clone()
         );
 
         Ok(())
@@ -776,7 +793,7 @@ mod tests {
     #[test]
     fn test_astore_typecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 2 3 3.14 astore".chars().into());
+        let result = interpreter.evaluate("1 2 3 3.14 astore".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -788,7 +805,7 @@ mod tests {
 
         for input in inputs {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -798,7 +815,7 @@ mod tests {
     #[test]
     fn test_aload() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[ 1 2 3 4 5 ] aload".chars().into())?;
+        interpreter.evaluate("[ 1 2 3 4 5 ] aload".chars())?;
 
         assert_eq!(6, interpreter.operand_stack.len());
 
@@ -811,7 +828,7 @@ mod tests {
                 Object::Integer(4),
                 Object::Integer(5)
             ],
-            arr.value().clone()
+            arr.array()?.clone()
         );
 
         assert_eq!(5, interpreter.pop_int()?);
@@ -826,7 +843,7 @@ mod tests {
     #[test]
     fn test_aload_typecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 aload".chars().into());
+        let result = interpreter.evaluate("1 aload".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -835,7 +852,7 @@ mod tests {
     #[test]
     fn test_aload_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("aload".chars().into());
+        let result = interpreter.evaluate("aload".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -844,7 +861,7 @@ mod tests {
     #[test]
     fn test_forall() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("0 [ 13 29 3 -8 21 ] { add } forall".chars().into())?;
+        interpreter.evaluate("0 [ 13 29 3 -8 21 ] { add } forall".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(58)), interpreter.operand_stack.pop());
@@ -855,7 +872,7 @@ mod tests {
     #[test]
     fn test_forall_dictionary() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("<</abc 1 /xyz 2>> {} forall".chars().into())?;
+        interpreter.evaluate("<</abc 1 /xyz 2>> {} forall".chars())?;
 
         assert_eq!(4, interpreter.operand_stack.len());
         assert!(matches!(interpreter.pop()?, Object::Integer(..)));
@@ -871,17 +888,17 @@ mod tests {
         for num in 0..5 {
             let input = format!("{num} packedarray");
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(1, interpreter.operand_stack.len());
             let Some(Object::PackedArray(arr_idx)) = interpreter.operand_stack.pop() else {
                 return Err("expected packed array object".into());
             };
 
-            let arr = interpreter.arrays.get(arr_idx)?;
-            assert!(arr.access().is_read_only());
+            let arr = interpreter.mem.get(arr_idx)?;
+            assert!(arr.access.is_read_only());
             assert_eq!(num, arr.len());
-            assert!(arr.value().iter().all(|obj| matches!(obj, Object::Null)));
+            assert!(arr.array()?.iter().all(|obj| matches!(obj, Object::Null)));
         }
 
         Ok(())
@@ -890,7 +907,7 @@ mod tests {
     #[test]
     fn test_packedarray_typecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("(str) packedarray".chars().into());
+        let result = interpreter.evaluate("(str) packedarray".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -899,7 +916,7 @@ mod tests {
     #[test]
     fn test_packedarray_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("packedarray".chars().into());
+        let result = interpreter.evaluate("packedarray".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -908,7 +925,7 @@ mod tests {
     #[test]
     fn test_setpacking() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("true setpacking".chars().into())?;
+        interpreter.evaluate("true setpacking".chars())?;
 
         assert!(interpreter.is_packing);
 
@@ -918,7 +935,7 @@ mod tests {
     #[test]
     fn test_setpacking_typecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("(str) setpacking".chars().into());
+        let result = interpreter.evaluate("(str) setpacking".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -927,7 +944,7 @@ mod tests {
     #[test]
     fn test_setpacking_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("setpacking".chars().into());
+        let result = interpreter.evaluate("setpacking".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -936,7 +953,7 @@ mod tests {
     #[test]
     fn test_currentpacking() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("true setpacking currentpacking".chars().into())?;
+        interpreter.evaluate("true setpacking currentpacking".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert!(interpreter.pop_bool()?);

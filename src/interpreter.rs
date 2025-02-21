@@ -1,53 +1,52 @@
 use std::{collections::HashMap, io};
 
 use crate::{
-    object::{Access, Container, Object, PostScriptArray, PostScriptDictionary, PostScriptString},
+    composite::{Access, Composite},
+    memory::VirtualMemory,
+    object::Object,
     operators,
     rand::RandomNumberGenerator,
     Error, ErrorKind, Lexer,
 };
 
 pub struct Interpreter {
-    pub arrays: Container<PostScriptArray>,
     pub dict_stack: Vec<usize>,
-    pub dicts: Container<PostScriptDictionary>,
     pub execution_stack: Vec<Object>,
     pub is_packing: bool,
+    pub mem: VirtualMemory,
     pub operand_stack: Vec<Object>,
     pub rng: RandomNumberGenerator,
-    pub strings: Container<PostScriptString>,
 }
 
 impl Default for Interpreter {
     fn default() -> Self {
-        let mut dicts = Container::default();
+        let mut mem = VirtualMemory::default();
 
-        let mut system_dict = PostScriptDictionary::from(operators::system_dict());
-        system_dict.set_access(Access::ExecuteOnly);
-        let system_dict_idx = dicts.insert(system_dict);
+        let mut system_dict: Composite = operators::system_dict().into();
+        system_dict.access = Access::ExecuteOnly;
+        let system_dict_idx = mem.insert(system_dict);
 
-        let global_dict = dicts.insert(HashMap::new().into());
-        let user_dict = dicts.insert(HashMap::new().into());
+        let global_dict = mem.insert(HashMap::new());
+        let user_dict = mem.insert(HashMap::new());
 
         Self {
-            arrays: Container::default(),
             dict_stack: vec![system_dict_idx, global_dict, user_dict],
             execution_stack: Vec::default(),
             is_packing: false,
             operand_stack: Vec::default(),
             rng: RandomNumberGenerator::default(),
-            strings: Container::default(),
-            dicts,
+            mem,
         }
     }
 }
 
 impl Interpreter {
-    pub fn evaluate<I>(&mut self, mut lexer: Lexer<I>) -> crate::Result<()>
+    pub fn evaluate<I: Into<Lexer<C>>, C>(&mut self, input: I) -> crate::Result<()>
     where
-        I: Iterator<Item = char>,
+        C: Iterator<Item = char>,
     {
-        while let Some(obj) = lexer.next_obj(&mut self.strings, &mut self.arrays) {
+        let mut lexer = input.into();
+        while let Some(obj) = lexer.next_obj(&mut self.mem) {
             let obj = obj?;
 
             if obj.is_procedure() {
@@ -68,9 +67,9 @@ impl Interpreter {
             },
             Object::Operator(op) => op(self),
             Object::Procedure(idx) => {
-                let proc = self.arrays.get(idx)?;
+                let proc = self.mem.get(idx)?;
 
-                for obj in proc.value().clone() {
+                for obj in proc.array()?.clone() {
                     self.execute_object(obj)?;
                 }
 
@@ -117,13 +116,10 @@ impl Interpreter {
             Object::String(idx) => {
                 let string = format!(
                     "({})",
-                    self.strings
-                        .get(*idx)
-                        .or(Err(io::Error::new(
-                            io::ErrorKind::NotFound,
-                            "missing string",
-                        )))?
-                        .value()
+                    self.mem.get_string(*idx).or(Err(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        "missing string",
+                    )))?
                 );
                 let output = string.as_bytes();
 
@@ -132,14 +128,10 @@ impl Interpreter {
             Object::Array(idx) | Object::PackedArray(idx) => {
                 let mut count = writer.write(b"[")?;
 
-                let arr = self
-                    .arrays
-                    .get(*idx)
-                    .or(Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "missing array",
-                    )))?
-                    .value();
+                let arr = self.mem.get_array(*idx).or(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "missing array",
+                )))?;
 
                 for obj in arr {
                     count += writer.write(b" ")?;
@@ -153,14 +145,10 @@ impl Interpreter {
             Object::Procedure(idx) => {
                 let mut count = writer.write(b"{")?;
 
-                let arr = self
-                    .arrays
-                    .get(*idx)
-                    .or(Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "missing array",
-                    )))?
-                    .value();
+                let arr = self.mem.get_array(*idx).or(Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "missing array",
+                )))?;
 
                 for obj in arr {
                     count += writer.write(b" ")?;
@@ -175,10 +163,9 @@ impl Interpreter {
                 let mut count = writer.write(b"<<")?;
 
                 let dict = self
-                    .dicts
-                    .get(*idx)
-                    .or(Err(io::Error::new(io::ErrorKind::NotFound, "missing dict")))?
-                    .value();
+                    .mem
+                    .get_dict(*idx)
+                    .or(Err(io::Error::new(io::ErrorKind::NotFound, "missing dict")))?;
 
                 for (key, value) in dict {
                     count += writer.write(b" ")?;
@@ -205,7 +192,7 @@ impl Interpreter {
         match obj {
             Object::Integer(i) => Ok(i.to_string()),
             Object::Real(r) => Ok(r.to_string()),
-            Object::String(idx) => Ok(self.strings.get(*idx)?.value().to_string()),
+            Object::String(idx) => Ok(self.mem.get_string(*idx)?.to_string()),
             Object::Name(name) => Ok(name.to_string()),
             _ => Err(Error::new(
                 ErrorKind::Unregistered,
@@ -216,7 +203,7 @@ impl Interpreter {
 
     pub fn find_dict(&self, name: String) -> crate::Result<usize> {
         for dict_idx in self.dict_stack.iter().rev() {
-            if self.dicts.get(*dict_idx)?.get(name.clone()).is_ok() {
+            if self.mem.get_dict(*dict_idx)?.get(&name).is_some() {
                 return Ok(*dict_idx);
             }
         }
@@ -226,8 +213,8 @@ impl Interpreter {
 
     pub fn find(&self, name: String) -> crate::Result<&Object> {
         for dict_idx in self.dict_stack.iter().rev() {
-            if let Ok(dict) = self.dicts.get(*dict_idx) {
-                if let Ok(obj) = dict.get(name.clone()) {
+            if let Ok(dict) = self.mem.get_dict(*dict_idx) {
+                if let Some(obj) = dict.get(&name) {
                     return Ok(obj);
                 }
             }
@@ -238,14 +225,19 @@ impl Interpreter {
 
     pub fn find_mut(&mut self, name: String) -> crate::Result<&mut Object> {
         let dict = self.dict_stack.iter().rev().find(|idx| {
-            self.dicts
-                .get(**idx)
-                .is_ok_and(|dict| dict.value().contains_key(&name))
+            self.mem
+                .get_dict(**idx)
+                .is_ok_and(|dict| dict.contains_key(&name))
         });
 
         match dict {
             Some(idx) => {
-                let obj = self.dicts.get_mut(*idx)?.get_mut(name)?;
+                let obj = self
+                    .mem
+                    .get_dict_mut(*idx)?
+                    .get_mut(&name)
+                    .ok_or(Error::from(ErrorKind::Undefined))?;
+
                 Ok(obj)
             },
             None => Err(Error::new(ErrorKind::Undefined, name)),
@@ -297,16 +289,16 @@ impl Interpreter {
         }
     }
 
-    pub fn pop_array(&mut self) -> crate::Result<&PostScriptArray> {
+    pub fn pop_array(&mut self) -> crate::Result<&Composite> {
         match self.pop()? {
-            Object::Array(idx) => Ok(self.arrays.get(idx)?),
+            Object::Array(idx) => Ok(self.mem.get(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
 
-    pub fn pop_array_mut(&mut self) -> crate::Result<&mut PostScriptArray> {
+    pub fn pop_array_mut(&mut self) -> crate::Result<&mut Composite> {
         match self.pop()? {
-            Object::Array(idx) => Ok(self.arrays.get_mut(idx)?),
+            Object::Array(idx) => Ok(self.mem.get_mut(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
@@ -318,16 +310,16 @@ impl Interpreter {
         }
     }
 
-    pub fn pop_dict(&mut self) -> crate::Result<&PostScriptDictionary> {
+    pub fn pop_dict(&mut self) -> crate::Result<&Composite> {
         match self.pop()? {
-            Object::Dictionary(idx) => Ok(self.dicts.get(idx)?),
+            Object::Dictionary(idx) => Ok(self.mem.get(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }
 
-    pub fn pop_dict_mut(&mut self) -> crate::Result<&mut PostScriptDictionary> {
+    pub fn pop_dict_mut(&mut self) -> crate::Result<&mut Composite> {
         match self.pop()? {
-            Object::Dictionary(idx) => Ok(self.dicts.get_mut(idx)?),
+            Object::Dictionary(idx) => Ok(self.mem.get_mut(idx)?),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }

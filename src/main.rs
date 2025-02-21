@@ -29,7 +29,7 @@ fn main() -> io::Result<()> {
             break;
         }
 
-        if let Err(e) = interpreter.evaluate(buf.chars().into()) {
+        if let Err(e) = interpreter.evaluate(buf.chars()) {
             fatal(&e.to_string());
         }
 

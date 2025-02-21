@@ -48,28 +48,28 @@ pub fn copy(interpreter: &mut Interpreter) -> crate::Result<()> {
 
             let source = match obj {
                 Object::Array(idx) | Object::PackedArray(idx) => {
-                    let arr = interpreter.arrays.get(idx)?;
+                    let arr = interpreter.mem.get(idx)?;
 
                     Ok(arr)
                 },
                 _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
             }?;
 
-            if source.access().is_exec_only() {
+            if source.access.is_exec_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            let source = source.value().clone();
+            let source = source.array()?.clone();
 
-            let destination = interpreter.arrays.get_mut(dest_idx)?;
+            let destination = interpreter.mem.get_mut(dest_idx)?;
 
-            if destination.access().is_read_only() {
+            if destination.access.is_read_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            for (index, obj) in source.into_iter().enumerate() {
-                match destination.value_mut().get_mut(index) {
-                    Some(dest_obj) => *dest_obj = obj,
+            for (index, obj) in source.iter().enumerate() {
+                match destination.array_mut()?.get_mut(index) {
+                    Some(dest_obj) => *dest_obj = obj.clone(),
                     None => return Err(Error::from(ErrorKind::RangeCheck)),
                 }
             }
@@ -79,15 +79,11 @@ pub fn copy(interpreter: &mut Interpreter) -> crate::Result<()> {
             Ok(())
         },
         Object::Dictionary(idx) => {
-            let source = interpreter.pop_dict()?.value().clone();
-            let destination = interpreter.dicts.get_mut(idx)?;
-
-            if destination.capacity() < source.len() {
-                return Err(Error::from(ErrorKind::RangeCheck));
-            }
+            let source = interpreter.pop_dict()?.dict()?.clone();
+            let destination = interpreter.mem.get_dict_mut(idx)?;
 
             for (key, value) in source {
-                destination.insert(key, value)?;
+                destination.insert(key, value);
             }
 
             interpreter.push(Object::Dictionary(idx));
@@ -208,7 +204,7 @@ mod tests {
     #[test]
     fn test_dup() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 dup".chars().into())?;
+        interpreter.evaluate("1 dup".chars())?;
 
         assert_eq!(2, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
@@ -220,7 +216,7 @@ mod tests {
     #[test]
     fn test_exch() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 exch".chars().into())?;
+        interpreter.evaluate("1 2 exch".chars())?;
 
         assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
         assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
@@ -234,7 +230,7 @@ mod tests {
 
         for input in cases {
             let mut interpreter = Interpreter::default();
-            let result = interpreter.evaluate(input.chars().into());
+            let result = interpreter.evaluate(input.chars());
 
             assert!(result.is_err());
             assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -244,7 +240,7 @@ mod tests {
     #[test]
     fn test_pop() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 pop".chars().into())?;
+        interpreter.evaluate("1 2 pop".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
@@ -255,7 +251,7 @@ mod tests {
     #[test]
     fn test_pop_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("pop".chars().into());
+        let result = interpreter.evaluate("pop".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -264,7 +260,7 @@ mod tests {
     #[test]
     fn test_copy_simple() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 3 2 copy".chars().into())?;
+        interpreter.evaluate("1 2 3 2 copy".chars())?;
 
         // Stack should be: 3 2 3 2 1 |
         assert_eq!(5, interpreter.operand_stack.len());
@@ -280,7 +276,7 @@ mod tests {
     #[test]
     fn test_copy_simple_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("copy".chars().into());
+        let result = interpreter.evaluate("copy".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -289,7 +285,7 @@ mod tests {
     #[test]
     fn test_copy_composite() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("[ 1 2 3 ] [ 4 5 6 ] copy".chars().into())?;
+        interpreter.evaluate("[ 1 2 3 ] [ 4 5 6 ] copy".chars())?;
 
         // Stack should be: [ 1 2 3 ] |
         assert_eq!(1, interpreter.operand_stack.len());
@@ -297,11 +293,11 @@ mod tests {
             return Err("expected array object".into());
         };
 
-        let arr = interpreter.arrays.get(arr_idx)?;
+        let arr = interpreter.mem.get_array(arr_idx)?;
 
-        assert_eq!(Some(Object::Integer(1)), arr.value().get(0).cloned());
-        assert_eq!(Some(Object::Integer(2)), arr.value().get(1).cloned());
-        assert_eq!(Some(Object::Integer(3)), arr.value().get(2).cloned());
+        assert_eq!(Some(Object::Integer(1)), arr.get(0).cloned());
+        assert_eq!(Some(Object::Integer(2)), arr.get(1).cloned());
+        assert_eq!(Some(Object::Integer(3)), arr.get(2).cloned());
 
         Ok(())
     }
@@ -309,7 +305,7 @@ mod tests {
     #[test]
     fn test_copy_composite_rangecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("[ 1 2 3 ] [ 4 5 ] copy".chars().into());
+        let result = interpreter.evaluate("[ 1 2 3 ] [ 4 5 ] copy".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -318,7 +314,7 @@ mod tests {
     #[test]
     fn test_copy_composite_typecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 [ 1 2 3 ] copy".chars().into());
+        let result = interpreter.evaluate("1 [ 1 2 3 ] copy".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
@@ -327,7 +323,7 @@ mod tests {
     #[test]
     fn test_copy_composite_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("[ 1 2 3 ] copy".chars().into());
+        let result = interpreter.evaluate("[ 1 2 3 ] copy".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -336,12 +332,15 @@ mod tests {
     #[test]
     fn test_copy_dictionary() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("<</key 1>> 1 dict copy".chars().into())?;
+        interpreter.evaluate("<</key 1>> 1 dict copy".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
 
-        let dict = interpreter.pop_dict()?;
-        assert_eq!(Object::Integer(1), dict.get("key".to_string()).cloned()?);
+        let dict = interpreter.pop_dict()?.dict()?;
+        assert_eq!(
+            Object::Integer(1),
+            dict.get("key").cloned().ok_or("expected value")?
+        );
 
         Ok(())
     }
@@ -349,7 +348,7 @@ mod tests {
     #[test]
     fn test_roll() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 3 3 1 roll".chars().into())?;
+        interpreter.evaluate("1 2 3 3 1 roll".chars())?;
 
         assert_eq!(3, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
@@ -357,7 +356,7 @@ mod tests {
         assert_eq!(Some(Object::Integer(3)), interpreter.operand_stack.pop());
 
         interpreter.operand_stack.clear();
-        interpreter.evaluate("1 2 3 3 -1 roll".chars().into())?;
+        interpreter.evaluate("1 2 3 3 -1 roll".chars())?;
 
         assert_eq!(3, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
@@ -370,7 +369,7 @@ mod tests {
     #[test]
     fn test_roll_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("roll".chars().into());
+        let result = interpreter.evaluate("roll".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -386,7 +385,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(
                 Some(Object::Integer(expect)),
@@ -400,7 +399,7 @@ mod tests {
     #[test]
     fn test_index_rangecheck() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 2 3 4 index".chars().into());
+        let result = interpreter.evaluate("1 2 3 4 index".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::RangeCheck, result.unwrap_err().kind());
@@ -409,7 +408,7 @@ mod tests {
     #[test]
     fn test_index_underflow() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("index".chars().into());
+        let result = interpreter.evaluate("index".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
@@ -418,7 +417,7 @@ mod tests {
     #[test]
     fn test_mark() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("mark".chars().into())?;
+        interpreter.evaluate("mark".chars())?;
 
         assert!(matches!(
             interpreter.operand_stack.pop(),
@@ -431,7 +430,7 @@ mod tests {
     #[test]
     fn test_clear() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 2 3 clear".chars().into())?;
+        interpreter.evaluate("1 2 3 clear".chars())?;
 
         assert_eq!(0, interpreter.operand_stack.len());
 
@@ -444,7 +443,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut interpreter = Interpreter::default();
-            interpreter.evaluate(input.chars().into())?;
+            interpreter.evaluate(input.chars())?;
 
             assert_eq!(
                 Some(Object::Integer(expect)),
@@ -458,7 +457,7 @@ mod tests {
     #[test]
     fn test_counttomark() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 mark 2 3 counttomark".chars().into())?;
+        interpreter.evaluate("1 mark 2 3 counttomark".chars())?;
 
         assert_eq!(Some(Object::Integer(2)), interpreter.operand_stack.pop());
 
@@ -468,7 +467,7 @@ mod tests {
     #[test]
     fn test_counttomark_unmatchedmark() {
         let mut interpreter = Interpreter::default();
-        let result = interpreter.evaluate("1 2 3 counttomark 3".chars().into());
+        let result = interpreter.evaluate("1 2 3 counttomark 3".chars());
 
         assert!(result.is_err());
         assert_eq!(ErrorKind::UnmatchedMark, result.unwrap_err().kind());
@@ -477,7 +476,7 @@ mod tests {
     #[test]
     fn test_cleartomark() -> Result<(), Box<dyn error::Error>> {
         let mut interpreter = Interpreter::default();
-        interpreter.evaluate("1 mark 2 3 cleartomark".chars().into())?;
+        interpreter.evaluate("1 mark 2 3 cleartomark".chars())?;
 
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Some(Object::Integer(1)), interpreter.operand_stack.pop());
