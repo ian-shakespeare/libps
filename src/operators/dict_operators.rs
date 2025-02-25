@@ -172,6 +172,8 @@ pub fn wheredef(interpreter: &mut Interpreter) -> crate::Result<()> {
 mod tests {
     use std::error;
 
+    use crate::composite::Composite;
+
     use super::*;
 
     #[test]
@@ -241,22 +243,110 @@ mod tests {
 
     #[test]
     fn test_maxlength() -> Result<(), Box<dyn error::Error>> {
-        Err("not implemented".into())
+        let mut interpreter = Interpreter::default();
+        let idx = interpreter.mem.insert(HashMap::new());
+        interpreter.push(Object::Dictionary(idx));
+        maxlength(&mut interpreter)?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+        assert_eq!(1, interpreter.pop_int()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_maxlength_underflow() {
+        let mut interpreter = Interpreter::default();
+
+        let result = maxlength(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_begin() -> Result<(), Box<dyn error::Error>> {
-        Err("not implemented".into())
+        let mut interpreter = Interpreter::default();
+        let idx = interpreter.mem.insert(HashMap::new());
+        interpreter.push(Object::Dictionary(idx));
+        begin(&mut interpreter)?;
+
+        assert_eq!(0, interpreter.operand_stack.len());
+        assert_eq!(4, interpreter.dict_stack.len());
+        assert_eq!(Some(idx), interpreter.dict_stack.last().cloned());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_begin_typecheck() {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Integer(0));
+
+        let result = begin(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::TypeCheck, result.unwrap_err().kind());
+    }
+
+    #[test]
+    fn test_begin_underflow() {
+        let mut interpreter = Interpreter::default();
+
+        let result = begin(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_end() -> Result<(), Box<dyn error::Error>> {
-        Err("not implemented".into())
+        let mut interpreter = Interpreter::default();
+        let idx = interpreter.mem.insert(HashMap::new());
+        interpreter.dict_stack.push(idx);
+        end(&mut interpreter)?;
+
+        assert_eq!(3, interpreter.dict_stack.len());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_end_dictunderflow() {
+        let mut interpreter = Interpreter::default();
+
+        let result = end(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::DictStackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
     fn test_def() -> Result<(), Box<dyn error::Error>> {
-        Err("not implemented".into())
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Name("/pi".into()));
+        interpreter.push(Object::Real(3.1415926));
+        def(&mut interpreter)?;
+
+        assert_eq!(0, interpreter.operand_stack.len());
+
+        let idx = interpreter.dict_stack.last().ok_or("expected dict")?;
+        let userdict = interpreter.mem.get_dict(*idx)?;
+        assert!(userdict.contains_key("/pi"));
+        assert_eq!(Some(Object::Real(3.1415926)), userdict.get("/pi").cloned());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_def_invalidaccess() {
+        assert!(false, "access levels are not yet defined");
+    }
+
+    #[test]
+    fn test_def_underflow() {
+        let mut interpreter = Interpreter::default();
+        interpreter.push(Object::Integer(0));
+
+        let result = def(&mut interpreter);
+        assert!(result.is_err());
+        assert_eq!(ErrorKind::StackUnderflow, result.unwrap_err().kind());
     }
 
     #[test]
