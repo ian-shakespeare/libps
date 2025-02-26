@@ -168,11 +168,52 @@ pub fn wheredef(interpreter: &mut Interpreter) -> crate::Result<()> {
     Ok(())
 }
 
+pub fn currentdict(interpreter: &mut Interpreter) -> crate::Result<()> {
+    let idx = interpreter
+        .dict_stack
+        .last()
+        .ok_or(Error::from(ErrorKind::DictStackUnderflow))?;
+
+    interpreter.push(Object::Dictionary(*idx));
+
+    Ok(())
+}
+
+pub fn errordict(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn errorstatus(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn userdict(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn globaldict(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn statusdict(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn countdictstack(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn dictstack(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
+pub fn cleardictstack(interpreter: &mut Interpreter) -> crate::Result<()> {
+    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::error;
-
-    use crate::composite::Composite;
 
     use super::*;
 
@@ -509,6 +550,23 @@ mod tests {
         wheredef(&mut interpreter)?;
         assert_eq!(1, interpreter.operand_stack.len());
         assert_eq!(Object::Boolean(false), interpreter.pop()?);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_currentdict() -> Result<(), Box<dyn error::Error>> {
+        let mut interpreter = Interpreter::default();
+        let idx = interpreter.mem.insert(HashMap::new());
+        interpreter.dict_stack.push(idx);
+        currentdict(&mut interpreter)?;
+
+        assert_eq!(1, interpreter.operand_stack.len());
+
+        let Object::Dictionary(found_idx) = interpreter.pop()? else {
+            return Err("expected dict".into());
+        };
+        assert_eq!(idx, found_idx);
 
         Ok(())
     }
