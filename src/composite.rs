@@ -1,3 +1,19 @@
+use crate::access::Access;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Mode {
+    Executable,
+    Literal,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct Composite {
+    pub access: Access,
+    pub key: usize,
+    pub mode: Mode,
+}
+
+/*
 use std::collections::HashMap;
 
 use crate::{Error, ErrorKind, Object};
@@ -124,3 +140,4 @@ impl Composite {
         }
     }
 }
+*/

@@ -1,63 +1,31 @@
-use std::collections::HashMap;
+use crate::{Error, ErrorKind};
 
-use crate::{composite::Composite, Error, ErrorKind, Object};
-
-#[derive(Default)]
-pub struct VirtualMemory {
-    data: Vec<Composite>,
+pub struct VirtualMemory<T> {
+    data: Vec<T>,
     keys: Vec<Option<usize>>,
 }
 
-impl VirtualMemory {
-    pub fn get(&self, index: usize) -> crate::Result<&Composite> {
+impl<T> VirtualMemory<T> {
+    pub fn new() -> Self {
+        Self {
+            data: Vec::new(),
+            keys: Vec::new(),
+        }
+    }
+
+    pub fn get(&self, index: usize) -> crate::Result<&T> {
         let key = self.get_key(index)?;
 
         Ok(&self.data[key])
     }
 
-    pub fn get_mut(&mut self, index: usize) -> crate::Result<&mut Composite> {
+    pub fn get_mut(&mut self, index: usize) -> crate::Result<&mut T> {
         let key = self.get_key(index)?;
 
         Ok(&mut self.data[key])
     }
 
-    pub fn get_array(&self, index: usize) -> crate::Result<&Vec<Object>> {
-        let composite = self.get(index)?;
-
-        composite.array()
-    }
-
-    pub fn get_array_mut(&mut self, index: usize) -> crate::Result<&mut Vec<Object>> {
-        let composite = self.get_mut(index)?;
-
-        composite.array_mut()
-    }
-
-    pub fn get_dict(&self, index: usize) -> crate::Result<&HashMap<String, Object>> {
-        let composite = self.get(index)?;
-
-        composite.dict()
-    }
-
-    pub fn get_dict_mut(&mut self, index: usize) -> crate::Result<&mut HashMap<String, Object>> {
-        let composite = self.get_mut(index)?;
-
-        composite.dict_mut()
-    }
-
-    pub fn get_string(&self, index: usize) -> crate::Result<&str> {
-        let composite = self.get(index)?;
-
-        composite.string()
-    }
-
-    pub fn get_string_mut(&mut self, index: usize) -> crate::Result<&mut String> {
-        let composite = self.get_mut(index)?;
-
-        composite.string_mut()
-    }
-
-    pub fn insert<C: Into<Composite>>(&mut self, value: C) -> usize {
+    pub fn insert<I: Into<T>>(&mut self, value: I) -> usize {
         let key = self.data.len();
         self.data.push(value.into());
 
@@ -127,18 +95,11 @@ mod tests {
 
     #[test]
     fn test_insert() -> Result<(), Box<dyn error::Error>> {
-        let mut vm = VirtualMemory::default();
+        let mut vm: VirtualMemory<&str> = VirtualMemory::new();
 
-        vm.insert("string1".to_string());
-        vm.insert(vec![
-            Object::Integer(1),
-            Object::Integer(2),
-            Object::Integer(3),
-        ]);
-
-        let mut dict = HashMap::new();
-        dict.insert("key".to_string(), Object::Boolean(true));
-        vm.insert(dict);
+        vm.insert("string1");
+        vm.insert("string2");
+        vm.insert("string3");
 
         assert_eq!(3, vm.data.len());
         assert_eq!(3, vm.keys.len());
@@ -154,39 +115,29 @@ mod tests {
 
     #[test]
     fn test_get() -> Result<(), Box<dyn error::Error>> {
-        let mut vm = VirtualMemory::default();
+        let mut vm: VirtualMemory<&str> = VirtualMemory::new();
 
-        let idx = vm.insert("string1".to_string());
-        assert_eq!("string1", vm.get(idx)?.string()?);
+        let idx = vm.insert("string1");
+        assert_eq!("string1", *vm.get(idx)?);
 
-        let input = vec![Object::Integer(1), Object::Integer(2), Object::Integer(3)];
-        let idx = vm.insert(input.clone());
-        assert_eq!(input, vm.get(idx)?.array()?.clone());
+        let idx = vm.insert("string2");
+        assert_eq!("string2", *vm.get(idx)?);
 
-        let mut input = HashMap::new();
-        input.insert("key".to_string(), Object::Boolean(true));
-        let idx = vm.insert(input.clone());
-        assert_eq!(input, vm.get(idx)?.dict()?.clone());
+        let idx = vm.insert("string3");
+        assert_eq!("string3", *vm.get(idx)?);
 
         Ok(())
     }
 
     #[test]
     fn test_delete() -> Result<(), Box<dyn error::Error>> {
-        let mut vm = VirtualMemory::default();
+        let mut vm: VirtualMemory<&str> = VirtualMemory::new();
 
-        let str_idx = vm.insert("string1".to_string());
-        vm.insert(vec![
-            Object::Integer(1),
-            Object::Integer(2),
-            Object::Integer(3),
-        ]);
+        let idx1 = vm.insert("string1");
+        vm.insert("string2");
+        let idx2 = vm.insert("string3");
 
-        let mut dict = HashMap::new();
-        dict.insert("key".to_string(), Object::Boolean(true));
-        let dict_idx = vm.insert(dict);
-
-        vm.delete(str_idx)?;
+        vm.delete(idx1)?;
 
         let key_count = vm
             .keys
@@ -195,9 +146,9 @@ mod tests {
         assert_eq!(2, key_count);
         assert_eq!(3, vm.keys.len());
         assert_eq!(2, vm.data.len());
-        assert_eq!(Some(Some(0)), vm.keys.get(dict_idx).copied());
+        assert_eq!(Some(Some(0)), vm.keys.get(idx2).copied());
 
-        vm.insert("string2".to_string());
+        vm.insert("string4");
 
         let key_count = vm
             .keys
@@ -212,9 +163,9 @@ mod tests {
 
     #[test]
     fn test_delete_single() -> Result<(), Box<dyn error::Error>> {
-        let mut vm = VirtualMemory::default();
+        let mut vm: VirtualMemory<&str> = VirtualMemory::new();
 
-        let idx = vm.insert("string".to_string());
+        let idx = vm.insert("string");
         vm.delete(idx)?;
 
         assert_eq!(0, vm.keys.len());
@@ -225,18 +176,12 @@ mod tests {
 
     #[test]
     fn test_delete_last() -> Result<(), Box<dyn error::Error>> {
-        let mut vm = VirtualMemory::default();
+        let mut vm: VirtualMemory<&str> = VirtualMemory::new();
 
-        vm.insert("string1".to_string());
-        vm.insert(vec![
-            Object::Integer(1),
-            Object::Integer(2),
-            Object::Integer(3),
-        ]);
+        vm.insert("string1");
+        vm.insert("string2");
 
-        let mut dict = HashMap::new();
-        dict.insert("key".to_string(), Object::Boolean(true));
-        let last_idx = vm.insert(dict);
+        let last_idx = vm.insert("string3");
 
         assert_eq!(3, vm.data.len());
         assert_eq!(3, vm.keys.len());

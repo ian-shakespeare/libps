@@ -1,36 +1,53 @@
 use std::{collections::HashMap, io};
 
 use crate::{
-    composite::{Access, Composite},
+    access::Access,
+    composite::{Composite, Mode},
     memory::VirtualMemory,
     object::Object,
     operators,
     rand::RandomNumberGenerator,
+    value::Value,
     Error, ErrorKind, Lexer,
 };
 
 pub struct Interpreter {
-    pub dict_stack: Vec<usize>,
+    pub dict_stack: Vec<Composite>,
     pub execution_stack: Vec<Object>,
     pub is_packing: bool,
-    pub mem: VirtualMemory,
+    pub mem: VirtualMemory<Value>,
     pub operand_stack: Vec<Object>,
     pub rng: RandomNumberGenerator,
 }
 
 impl Default for Interpreter {
     fn default() -> Self {
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
 
-        let mut system_dict: Composite = operators::system_dict().into();
-        system_dict.access = Access::ExecuteOnly;
-        let system_dict_idx = mem.insert(system_dict);
+        let system_dict: Value = operators::system_dict().into();
+        let key = mem.insert(system_dict);
+        let system_dict = Composite {
+            access: Access::ExecuteOnly,
+            mode: Mode::Executable,
+            key,
+        };
 
-        let global_dict = mem.insert(HashMap::new());
-        let user_dict = mem.insert(HashMap::new());
+        let key = mem.insert(HashMap::new());
+        let global_dict = Composite {
+            access: Access::Unlimited,
+            mode: Mode::Executable,
+            key,
+        };
+
+        let key = mem.insert(HashMap::new());
+        let user_dict = Composite {
+            access: Access::Unlimited,
+            mode: Mode::Executable,
+            key,
+        };
 
         Self {
-            dict_stack: vec![system_dict_idx, global_dict, user_dict],
+            dict_stack: vec![system_dict, global_dict, user_dict],
             execution_stack: Vec::default(),
             is_packing: false,
             operand_stack: Vec::default(),
@@ -45,13 +62,17 @@ impl Interpreter {
     where
         C: Iterator<Item = char>,
     {
-        let mut lexer = input.into();
+        let mut lexer: Lexer<C> = input.into();
         while let Some(obj) = lexer.next_obj(&mut self.mem) {
             let obj = obj?;
 
-            if obj.is_procedure() {
-                self.push(obj);
-                continue;
+            if obj.is_array() {
+                let Composite { mode, .. } = obj.into_composite()?;
+
+                if mode == Mode::Literal {
+                    self.push(obj);
+                    continue;
+                }
             }
 
             self.execute_object(obj)?;
@@ -66,25 +87,31 @@ impl Interpreter {
                 Ok(())
             },
             Object::Operator(op) => op(self),
-            Object::Procedure(idx) => {
-                let proc = self.mem.get(idx)?;
+            Object::Array(comp) => {
+                if comp.mode == Mode::Executable {
+                    let arr: &Vec<Object> = self.mem.get(comp.key)?.try_into()?;
+                    for obj in arr.clone() {
+                        self.execute_object(obj)?;
+                    }
 
-                for obj in proc.array()?.clone() {
-                    self.execute_object(obj)?;
+                    Ok(())
+                } else {
+                    self.push(Object::Array(comp));
+
+                    Ok(())
                 }
-
-                Ok(())
             },
             Object::Name(name) => {
-                if name.starts_with('/') {
-                    let name = name.trim_start_matches('/');
-                    self.push(Object::Name(name.to_string()));
-                    return Ok(());
+                if name.mode == Mode::Literal {
+                    let name = name.value().trim_start_matches('/');
+                    self.push(Object::Name(name.into()));
+
+                    Ok(())
+                } else {
+                    let obj = self.find(name.value())?.clone();
+
+                    self.execute_object(obj)
                 }
-
-                let obj = self.find(name)?.clone();
-
-                self.execute_object(obj)
             },
             _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
         }
@@ -113,59 +140,52 @@ impl Interpreter {
                 }
             },
             Object::Boolean(b) => writer.write(b.to_string().as_bytes()),
-            Object::String(idx) => {
-                let string = format!(
-                    "({})",
-                    self.mem.get_string(*idx).or(Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        "missing string",
-                    )))?
-                );
+            Object::String(Composite { key, .. }) => {
+                let string: &str = self
+                    .mem
+                    .get(*key)
+                    .or(Err(io::Error::from(io::ErrorKind::NotFound)))?
+                    .try_into()
+                    .or(Err(io::Error::from(io::ErrorKind::InvalidData)))?;
+                let string = format!("({})", string);
                 let output = string.as_bytes();
 
                 writer.write(output)
             },
-            Object::Array(idx) | Object::PackedArray(idx) => {
-                let mut count = writer.write(b"[")?;
+            Object::Array(Composite { access, key, .. })
+            | Object::PackedArray(Composite { access, key, .. }) => {
+                let (left_delim, right_delim) = if access.is_exec_only() {
+                    (b"{", b" }")
+                } else {
+                    (b"[", b" ]")
+                };
+                let mut count = writer.write(left_delim)?;
 
-                let arr = self.mem.get_array(*idx).or(Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "missing array",
-                )))?;
-
-                for obj in arr {
-                    count += writer.write(b" ")?;
-                    count += self.write_object(writer, obj)?;
-                }
-
-                count += writer.write(b" ]")?;
-
-                Ok(count)
-            },
-            Object::Procedure(idx) => {
-                let mut count = writer.write(b"{")?;
-
-                let arr = self.mem.get_array(*idx).or(Err(io::Error::new(
-                    io::ErrorKind::NotFound,
-                    "missing array",
-                )))?;
+                let arr: &Vec<Object> = self
+                    .mem
+                    .get(*key)
+                    .or(Err(io::Error::from(io::ErrorKind::NotFound)))?
+                    .try_into()
+                    .or(Err(io::Error::from(io::ErrorKind::InvalidData)))?;
 
                 for obj in arr {
                     count += writer.write(b" ")?;
                     count += self.write_object(writer, obj)?;
                 }
 
-                count += writer.write(b" }")?;
+                count += writer.write(right_delim)?;
 
                 Ok(count)
             },
-            Object::Dictionary(idx) => {
+            Object::Dictionary(Composite { key, .. }) => {
                 let mut count = writer.write(b"<<")?;
 
-                let dict = self
+                let dict: &HashMap<String, Object> = self
                     .mem
-                    .get_dict(*idx)
-                    .or(Err(io::Error::new(io::ErrorKind::NotFound, "missing dict")))?;
+                    .get(*key)
+                    .or(Err(io::Error::from(io::ErrorKind::NotFound)))?
+                    .try_into()
+                    .or(Err(io::Error::from(io::ErrorKind::InvalidData)))?;
 
                 for (key, value) in dict {
                     count += writer.write(b" ")?;
@@ -181,7 +201,7 @@ impl Interpreter {
 
                 Ok(count)
             },
-            Object::Name(name) => writer.write(name.as_bytes()),
+            Object::Name(name) => writer.write(name.value().as_bytes()),
             Object::Mark => writer.write(b"mark"),
             Object::Null => writer.write(b"null"),
             _ => Ok(0),
@@ -192,8 +212,12 @@ impl Interpreter {
         match obj {
             Object::Integer(i) => Ok(i.to_string()),
             Object::Real(r) => Ok(r.to_string()),
-            Object::String(idx) => Ok(self.mem.get_string(*idx)?.to_string()),
-            Object::Name(name) => Ok(name.to_string()),
+            Object::String(Composite { key, .. }) => {
+                let s: &str = self.mem.get(*key)?.try_into()?;
+
+                Ok(s.to_string())
+            },
+            Object::Name(name) => Ok(name.value().to_string()),
             _ => Err(Error::new(
                 ErrorKind::Unregistered,
                 "cannot stringify object",
@@ -201,47 +225,37 @@ impl Interpreter {
         }
     }
 
-    pub fn find_dict(&self, name: String) -> crate::Result<usize> {
-        for dict_idx in self.dict_stack.iter().rev() {
-            if self.mem.get_dict(*dict_idx)?.get(&name).is_some() {
-                return Ok(*dict_idx);
+    pub fn find_dict(&self, name: &str) -> crate::Result<usize> {
+        for Composite { key, .. } in self.dict_stack.iter().rev() {
+            let dict: &HashMap<String, Object> = self.mem.get(*key)?.try_into()?;
+            if dict.contains_key(name) {
+                return Ok(*key);
             }
         }
 
         Err(Error::new(ErrorKind::Undefined, name))
     }
 
-    pub fn find(&self, name: String) -> crate::Result<&Object> {
-        for dict_idx in self.dict_stack.iter().rev() {
-            if let Ok(dict) = self.mem.get_dict(*dict_idx) {
-                if let Some(obj) = dict.get(&name) {
-                    return Ok(obj);
-                }
+    pub fn find(&self, name: &str) -> crate::Result<&Object> {
+        for Composite { key, .. } in self.dict_stack.iter().rev() {
+            let dict: &HashMap<String, Object> = self.mem.get(*key)?.try_into()?;
+            if let Some(obj) = dict.get(name) {
+                return Ok(obj);
             }
         }
 
         Err(Error::new(ErrorKind::Undefined, name))
     }
 
-    pub fn find_mut(&mut self, name: String) -> crate::Result<&mut Object> {
-        let dict = self.dict_stack.iter().rev().find(|idx| {
-            self.mem
-                .get_dict(**idx)
-                .is_ok_and(|dict| dict.contains_key(&name))
-        });
+    pub fn find_mut(&mut self, name: &str) -> crate::Result<&mut Object> {
+        let key = self.find_dict(name)?;
 
-        match dict {
-            Some(idx) => {
-                let obj = self
-                    .mem
-                    .get_dict_mut(*idx)?
-                    .get_mut(&name)
-                    .ok_or(Error::from(ErrorKind::Undefined))?;
+        let dict: &mut HashMap<String, Object> = self.mem.get_mut(key)?.try_into()?;
+        let obj = dict
+            .get_mut(name)
+            .ok_or(Error::from(ErrorKind::Undefined))?;
 
-                Ok(obj)
-            },
-            None => Err(Error::new(ErrorKind::Undefined, name)),
-        }
+        Ok(obj)
     }
 
     pub fn push(&mut self, obj: Object) {
@@ -259,7 +273,7 @@ impl Interpreter {
         let obj = self.pop_literal()?;
 
         if let Object::Name(name) = obj {
-            return self.find(name).cloned();
+            return self.find(name.value()).cloned();
         }
 
         Ok(obj)
@@ -289,16 +303,9 @@ impl Interpreter {
         }
     }
 
-    pub fn pop_array(&mut self) -> crate::Result<&Composite> {
+    pub fn pop_array(&mut self) -> crate::Result<Composite> {
         match self.pop()? {
-            Object::Array(idx) => Ok(self.mem.get(idx)?),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-        }
-    }
-
-    pub fn pop_array_mut(&mut self) -> crate::Result<&mut Composite> {
-        match self.pop()? {
-            Object::Array(idx) => Ok(self.mem.get_mut(idx)?),
+            Object::Array(comp) => Ok(comp),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
     }
@@ -310,16 +317,9 @@ impl Interpreter {
         }
     }
 
-    pub fn pop_dict(&mut self) -> crate::Result<&Composite> {
+    pub fn pop_dict(&mut self) -> crate::Result<Composite> {
         match self.pop()? {
-            Object::Dictionary(idx) => Ok(self.mem.get(idx)?),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
-        }
-    }
-
-    pub fn pop_dict_mut(&mut self) -> crate::Result<&mut Composite> {
-        match self.pop()? {
-            Object::Dictionary(idx) => Ok(self.mem.get_mut(idx)?),
+            Object::Dictionary(comp) => Ok(comp),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }

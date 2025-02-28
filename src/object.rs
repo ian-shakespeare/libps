@@ -1,16 +1,42 @@
-use crate::{Error, ErrorKind, Interpreter};
+use crate::{
+    composite::{Composite, Mode},
+    Error, ErrorKind, Interpreter,
+};
+
+#[derive(Clone, Debug)]
+pub struct Name {
+    pub mode: Mode,
+    value: String,
+}
+
+impl Name {
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+}
+
+impl<S> From<S> for Name
+where
+    S: Into<String>,
+{
+    fn from(value: S) -> Self {
+        Self {
+            value: value.into(),
+            mode: Mode::Executable,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub enum Object {
     Integer(i32),
     Real(f64),
     Boolean(bool),
-    Array(usize),
-    PackedArray(usize),
-    Procedure(usize),
-    String(usize),
-    Dictionary(usize),
-    Name(String),
+    Array(Composite),
+    PackedArray(Composite),
+    String(Composite),
+    Dictionary(Composite),
+    Name(Name),
     Operator(fn(&mut Interpreter) -> crate::Result<()>),
     File,
     Mark,
@@ -26,7 +52,7 @@ impl From<Object> for String {
             Object::Integer(value) => value.to_string(),
             Object::Real(value) => value.to_string(),
             Object::Boolean(value) => value.to_string(),
-            Object::Name(value) => value,
+            Object::Name(Name { value, .. }) => value,
             Object::Array(_) => "array".to_string(),
             Object::PackedArray(_) => "packedarray".to_string(),
             Object::Mark => "mark".to_string(),
@@ -53,23 +79,23 @@ impl PartialEq for Object {
                 Self::Boolean(other_value) => value == other_value,
                 _ => false,
             },
-            Self::Array(value) => match other {
-                Self::Array(other_value) => value == other_value,
-                _ => false,
-            },
-            Self::PackedArray(value) => match other {
-                Self::PackedArray(other_value) => value == other_value,
-                _ => false,
-            },
-            Self::String(value) => match other {
-                Self::String(other_value) => value == other_value,
-                _ => false,
-            },
-            Self::Name(value) => match other {
-                Self::Name(other_value) => value == other_value,
+            Self::Name(Name { value, .. }) => match other {
+                Self::Name(Name {
+                    value: other_value, ..
+                }) => value == other_value,
                 _ => false,
             },
             Self::Null => matches!(other, Self::Null),
+            Self::Array(Composite { key, .. })
+            | Self::PackedArray(Composite { key, .. })
+            | Self::String(Composite { key, .. })
+            | Self::Dictionary(Composite { key, .. }) => match other {
+                Self::Array(Composite { key: other_key, .. })
+                | Self::PackedArray(Composite { key: other_key, .. })
+                | Self::String(Composite { key: other_key, .. })
+                | Self::Dictionary(Composite { key: other_key, .. }) => key == other_key,
+                _ => false,
+            },
             _ => false,
         }
     }
@@ -86,7 +112,6 @@ impl Object {
             Self::Name(..) => "name",
             Self::PackedArray(..) => "packedarray",
             Self::Array(..) => "array",
-            Self::Procedure(..) => "procedure",
             Self::String(..) => "string",
             Self::Dictionary(..) => "dictionary",
             Self::Operator(..) => "operator",
@@ -115,8 +140,8 @@ impl Object {
         matches!(self, Self::Mark)
     }
 
-    pub fn is_procedure(&self) -> bool {
-        matches!(self, Self::Procedure(..))
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(..))
     }
 
     pub fn into_int(&self) -> crate::Result<i32> {
@@ -147,6 +172,15 @@ impl Object {
                 Err(_) => Err(Error::from(ErrorKind::RangeCheck)),
             },
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected usize")),
+        }
+    }
+
+    pub fn into_composite(&self) -> crate::Result<Composite> {
+        match self {
+            Self::Array(c) | Self::PackedArray(c) | Self::String(c) | Self::Dictionary(c) => {
+                Ok(c.clone())
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected composite")),
         }
     }
 }

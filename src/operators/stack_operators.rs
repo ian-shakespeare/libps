@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{Error, ErrorKind, Interpreter, Object};
 
 use super::usize_to_i32;
@@ -43,15 +45,11 @@ pub fn copy(interpreter: &mut Interpreter) -> crate::Result<()> {
 
             Ok(())
         },
-        Object::Array(dest_idx) => {
+        Object::Array(comp) => {
             let obj = interpreter.pop()?;
 
             let source = match obj {
-                Object::Array(idx) | Object::PackedArray(idx) => {
-                    let arr = interpreter.mem.get(idx)?;
-
-                    Ok(arr)
-                },
+                Object::Array(..) | Object::PackedArray(..) => Ok(obj.into_composite()?),
                 _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
             }?;
 
@@ -59,34 +57,43 @@ pub fn copy(interpreter: &mut Interpreter) -> crate::Result<()> {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            let source = source.array()?.clone();
+            let source: &Vec<Object> = interpreter.mem.get(source.key)?.try_into()?;
+            let source = source.clone();
 
-            let destination = interpreter.mem.get_mut(dest_idx)?;
-
-            if destination.access.is_read_only() {
+            if comp.access.is_read_only() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            for (index, obj) in source.iter().enumerate() {
-                match destination.array_mut()?.get_mut(index) {
-                    Some(dest_obj) => *dest_obj = obj.clone(),
+            let destination: &mut Vec<Object> = interpreter.mem.get_mut(comp.key)?.try_into()?;
+
+            for (index, obj) in source.into_iter().enumerate() {
+                match destination.get_mut(index) {
+                    Some(dest_obj) => *dest_obj = obj,
                     None => return Err(Error::from(ErrorKind::RangeCheck)),
                 }
             }
 
-            interpreter.push(Object::Array(dest_idx));
+            interpreter.push(Object::Array(comp));
 
             Ok(())
         },
-        Object::Dictionary(idx) => {
-            let source = interpreter.pop_dict()?.dict()?.clone();
-            let destination = interpreter.mem.get_dict_mut(idx)?;
+        Object::Dictionary(comp) => {
+            let source = interpreter.pop_dict()?;
+            if !source.access.is_readable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            let source: &HashMap<String, Object> = interpreter.mem.get(source.key)?.try_into()?;
+            let source = source.clone();
+
+            let destination: &mut HashMap<String, Object> =
+                interpreter.mem.get_mut(comp.key)?.try_into()?;
 
             for (key, value) in source {
                 destination.insert(key, value);
             }
 
-            interpreter.push(Object::Dictionary(idx));
+            interpreter.push(Object::Dictionary(comp));
 
             Ok(())
         },
@@ -199,6 +206,8 @@ pub fn cleartomark(interpreter: &mut Interpreter) -> crate::Result<()> {
 mod tests {
     use std::error;
 
+    use crate::composite::Composite;
+
     use super::*;
 
     #[test]
@@ -289,11 +298,11 @@ mod tests {
 
         // Stack should be: [ 1 2 3 ] |
         assert_eq!(1, interpreter.operand_stack.len());
-        let Some(Object::Array(arr_idx)) = interpreter.operand_stack.pop() else {
+        let Some(Object::Array(Composite { key, .. })) = interpreter.operand_stack.pop() else {
             return Err("expected array object".into());
         };
 
-        let arr = interpreter.mem.get_array(arr_idx)?;
+        let arr: &Vec<Object> = interpreter.mem.get(key)?.try_into()?;
 
         assert_eq!(Some(Object::Integer(1)), arr.get(0).cloned());
         assert_eq!(Some(Object::Integer(2)), arr.get(1).cloned());
@@ -336,7 +345,9 @@ mod tests {
 
         assert_eq!(1, interpreter.operand_stack.len());
 
-        let dict = interpreter.pop_dict()?.dict()?;
+        let Composite { key, .. } = interpreter.pop_dict()?;
+        let dict: &HashMap<String, Object> = interpreter.mem.get(key)?.try_into()?;
+
         assert_eq!(
             Object::Integer(1),
             dict.get("key").cloned().ok_or("expected value")?

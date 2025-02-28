@@ -1,10 +1,12 @@
 use std::iter;
 
 use crate::{
-    composite::{Access, Composite},
+    access::Access,
+    composite::{Composite, Mode},
     encoding::{decode_ascii85, decode_hex},
     memory::VirtualMemory,
     object::Object,
+    value::Value,
     Error, ErrorKind,
 };
 
@@ -30,7 +32,7 @@ impl<I> Lexer<I>
 where
     I: Iterator<Item = char>,
 {
-    pub fn next_obj(&mut self, mem: &mut VirtualMemory) -> Option<crate::Result<Object>> {
+    pub fn next_obj(&mut self, mem: &mut VirtualMemory<Value>) -> Option<crate::Result<Object>> {
         loop {
             if self.next_is_whitespace() {
                 self.input.next()?;
@@ -75,7 +77,7 @@ where
         Ok(())
     }
 
-    fn lex_gt(&mut self, mem: &mut VirtualMemory) -> crate::Result<Object> {
+    fn lex_gt(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
@@ -88,7 +90,7 @@ where
         match ch {
             '<' => {
                 let _ = self.input.next();
-                Ok(Object::Name("<<".to_string()))
+                Ok(Object::Name("<<".into()))
             },
             '~' => self.lex_string_base85(mem),
             '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(mem),
@@ -126,7 +128,7 @@ where
         Ok(match name.as_str() {
             "true" => Object::Boolean(true),
             "false" => Object::Boolean(true),
-            name => Object::Name(name.to_string()),
+            name => Object::Name(name.into()),
         })
     }
 
@@ -192,7 +194,7 @@ where
         }
     }
 
-    fn lex_procedure(&mut self, mem: &mut VirtualMemory) -> crate::Result<Object> {
+    fn lex_procedure(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
         self.expect_char('{')?;
 
         let mut objs = Vec::new();
@@ -203,7 +205,7 @@ where
                 .ok_or(Error::new(ErrorKind::SyntaxError, "unterminated procedure"))??;
 
             if let Object::Name(ref n) = obj {
-                if n == "}" {
+                if "}" == n.value() {
                     break;
                 }
             }
@@ -211,14 +213,16 @@ where
             objs.push(obj);
         }
 
-        let mut proc: Composite = objs.into();
-        proc.access = Access::ExecuteOnly;
-        let idx = mem.insert(proc);
+        let key = mem.insert(objs);
 
-        Ok(Object::Procedure(idx))
+        Ok(Object::Array(Composite {
+            access: Access::ExecuteOnly,
+            mode: Mode::Literal,
+            key,
+        }))
     }
 
-    fn lex_string_base85(&mut self, mem: &mut VirtualMemory) -> crate::Result<Object> {
+    fn lex_string_base85(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -244,12 +248,16 @@ where
         }
 
         let string = decode_ascii85(&string)?;
-        let idx = mem.insert(string);
+        let key = mem.insert(string);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Composite {
+            access: Access::Unlimited,
+            mode: Mode::Literal,
+            key,
+        }))
     }
 
-    fn lex_string_hex(&mut self, mem: &mut VirtualMemory) -> crate::Result<Object> {
+    fn lex_string_hex(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -270,12 +278,16 @@ where
         }
 
         let string = decode_hex(&string)?;
-        let idx = mem.insert(string);
+        let key = mem.insert(string);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Composite {
+            access: Access::Unlimited,
+            mode: Mode::Literal,
+            key,
+        }))
     }
 
-    fn lex_string_literal(&mut self, mem: &mut VirtualMemory) -> crate::Result<Object> {
+    fn lex_string_literal(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
         self.expect_char('(')?;
 
         let mut string = String::new();
@@ -350,9 +362,14 @@ where
             }
         }
 
-        let idx = mem.insert(string);
+        let string = decode_hex(&string)?;
+        let key = mem.insert(string);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Composite {
+            access: Access::Unlimited,
+            mode: Mode::Literal,
+            key,
+        }))
     }
 
     fn expect_char(&mut self, ch: char) -> crate::Result<()> {
@@ -396,7 +413,7 @@ mod tests {
     #[test]
     fn test_lex_comment() -> Result<(), Box<dyn error::Error>> {
         let mut lexer = Lexer::from("% this is a comment".chars());
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
         let obj = lexer.next_obj(&mut mem);
 
         assert!(obj.is_none());
@@ -425,11 +442,11 @@ mod tests {
 
         for input in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
 
-            assert_eq!(Object::Name(input.to_string()), name);
+            assert_eq!(Object::Name(input.into()), name);
         }
 
         Ok(())
@@ -459,7 +476,7 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
 
@@ -475,7 +492,7 @@ mod tests {
 
         for input in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             let result = lexer.next_obj(&mut mem).ok_or("expected object")?;
 
@@ -506,13 +523,13 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
-            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
                 return Err("expected string object".into());
             };
 
-            let string = mem.get(str_idx)?.string()?;
+            let string: &str = mem.get(key)?.try_into()?;
 
             assert_eq!(expect, string);
         }
@@ -539,13 +556,13 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
-            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
                 return Err("expected string object".into());
             };
 
-            let string = mem.get(str_idx)?.string()?;
+            let string: &str = mem.get(key)?.try_into()?;
 
             assert_eq!(expect, string);
         }
@@ -557,13 +574,13 @@ mod tests {
     fn test_lex_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
         let input = "(\\ii)";
         let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
 
-        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
             return Err("expected string object".into());
         };
 
-        let string = mem.get(str_idx)?.string()?;
+        let string: &str = mem.get(key)?.try_into()?;
 
         assert_eq!("ii", string);
 
@@ -576,13 +593,13 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
-            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
                 return Err("expected string object".into());
             };
 
-            let string = mem.get(str_idx)?.string()?;
+            let string: &str = mem.get(key)?.try_into()?;
 
             assert_eq!(expect, string);
         }
@@ -603,13 +620,13 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
-            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
                 return Err("expected string object".into());
             };
 
-            let string = mem.get(str_idx)?.string()?;
+            let string: &str = mem.get(key)?.try_into()?;
 
             assert_eq!(expect, string);
         }
@@ -622,13 +639,13 @@ mod tests {
         let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
         let expect = "this is some text";
         let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
 
-        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
             return Err("expected string object".into());
         };
 
-        let string = mem.get(str_idx)?.string()?;
+        let string: &str = mem.get(key)?.try_into()?;
 
         assert_eq!(expect, string);
 
@@ -645,14 +662,14 @@ mod tests {
         ];
 
         let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
 
         for e in expect {
-            let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
                 return Err("expected string object".into());
             };
 
-            let string = mem.get(str_idx)?.string()?;
+            let string: &str = mem.get(key)?.try_into()?;
 
             assert_eq!(e, string);
         }
@@ -676,11 +693,11 @@ mod tests {
 
         for input in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
 
-            assert_eq!(Object::Name(input.to_string()), name);
+            assert_eq!(Object::Name(input.into()), name);
         }
 
         Ok(())
@@ -692,11 +709,10 @@ mod tests {
 
         for input in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert!(matches!(obj, Object::Procedure(_)));
+            assert!(obj.is_array());
         }
 
         Ok(())
@@ -708,24 +724,25 @@ mod tests {
 
         for input in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
-            let Some(Ok(Object::Procedure(outer_idx))) = lexer.next_obj(&mut mem) else {
+            let Some(Ok(Object::Array(Composite { access, key, .. }))) = lexer.next_obj(&mut mem)
+            else {
                 return Err("expected procedure object".into());
             };
+            assert!(access.is_exec_only());
 
-            let outer = mem.get(outer_idx)?;
-            assert!(outer.access.is_exec_only());
-            assert_eq!(1, outer.array()?.len());
+            let outer: &Vec<Object> = mem.get(key)?.try_into()?;
+            assert_eq!(1, outer.len());
 
-            let Some(Object::Procedure(inner_idx)) = outer.array()?.first() else {
+            let Some(Object::Array(Composite { access, key, .. })) = outer.first() else {
                 return Err("expected procedure object".into());
             };
+            assert!(access.is_exec_only());
 
-            let inner = mem.get(*inner_idx)?;
-            assert!(inner.access.is_exec_only());
-            assert_eq!(1, inner.array()?.len());
-            assert_eq!(Some(Object::Integer(1)), inner.array()?.first().cloned());
+            let inner: &Vec<Object> = mem.get(*key)?.try_into()?;
+            assert_eq!(1, inner.len());
+            assert_eq!(Some(Object::Integer(1)), inner.first().cloned());
         }
 
         Ok(())
@@ -758,12 +775,12 @@ mod tests {
 
         for (input, expect) in inputs {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
             let _ = lexer.next_obj(&mut mem);
 
             let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
 
-            assert_eq!(Object::Name(expect.to_string()), obj);
+            assert_eq!(Object::Name(expect.into()), obj);
         }
 
         Ok(())
@@ -775,10 +792,10 @@ mod tests {
 
         for (input, expect) in cases {
             let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::default();
+            let mut mem = VirtualMemory::new();
 
             while let Some(obj) = lexer.next_obj(&mut mem) {
-                assert_eq!(Object::Name(expect.to_string()), obj?);
+                assert_eq!(Object::Name(expect.into()), obj?);
             }
         }
 
@@ -801,46 +818,46 @@ myNegativeReal -3.1456
         ";
 
         let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::default();
+        let mut mem = VirtualMemory::new();
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myStr".to_string()), name);
+        assert_eq!(Object::Name("myStr".into()), name);
 
-        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
             return Err("expected string object".into());
         };
-        let string = mem.get(str_idx)?;
-        assert_eq!("i have a string right here", string.string()?);
+        let string: &str = mem.get(key)?.try_into()?;
+        assert_eq!("i have a string right here", string);
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myOtherStr".to_string()), name);
+        assert_eq!(Object::Name("myOtherStr".into()), name);
 
-        let Some(Ok(Object::String(str_idx))) = lexer.next_obj(&mut mem) else {
+        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
             return Err("expected string object".into());
         };
-        let string = mem.get(str_idx)?;
-        assert_eq!("and\nanother right here", string.string()?);
+        let string: &str = mem.get(key)?.try_into()?;
+        assert_eq!("and\nanother right here", string);
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myInt".to_string()), name);
+        assert_eq!(Object::Name("myInt".into()), name);
 
         let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
         assert_eq!(Object::Integer(1234567890), integer);
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeInt".to_string()), name);
+        assert_eq!(Object::Name("myNegativeInt".into()), name);
 
         let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
         assert_eq!(Object::Integer(-1234567890), integer);
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myReal".to_string()), name);
+        assert_eq!(Object::Name("myReal".into()), name);
 
         let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
         assert_eq!(Object::Real(3.1456), integer);
 
         let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeReal".to_string()), name);
+        assert_eq!(Object::Name("myNegativeReal".into()), name);
 
         let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
         assert_eq!(Object::Real(-3.1456), integer);
