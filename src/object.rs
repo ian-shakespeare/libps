@@ -1,186 +1,274 @@
-use crate::{
-    composite::{Composite, Mode},
-    Error, ErrorKind, Interpreter,
-};
+use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
-pub struct Name {
-    pub mode: Mode,
-    value: String,
-}
+use crate::{context::Context, Error, ErrorKind};
 
-impl Name {
-    pub fn value(&self) -> &str {
-        &self.value
-    }
-}
-
-impl<S> From<S> for Name
-where
-    S: Into<String>,
-{
-    fn from(value: S) -> Self {
-        Self {
-            value: value.into(),
-            mode: Mode::Executable,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub enum Object {
-    Integer(i32),
-    Real(f64),
+    /* Simple */
     Boolean(bool),
-    Array(Composite),
-    PackedArray(Composite),
-    String(Composite),
-    Dictionary(Composite),
-    Name(Name),
-    Operator(fn(&mut Interpreter) -> crate::Result<()>),
-    File,
+    FontId,
+    Integer(i32),
     Mark,
+    Name(NameObject),
     Null,
-    Save,
-    FontId, // TODO: Figure out what these things are
-    GState,
-}
+    Operator(fn(&mut Context) -> crate::Result<()>),
+    Real(f64),
 
-impl From<Object> for String {
-    fn from(value: Object) -> Self {
-        match value {
-            Object::Integer(value) => value.to_string(),
-            Object::Real(value) => value.to_string(),
-            Object::Boolean(value) => value.to_string(),
-            Object::Name(Name { value, .. }) => value,
-            Object::Array(_) => "array".to_string(),
-            Object::PackedArray(_) => "packedarray".to_string(),
-            Object::Mark => "mark".to_string(),
-            Object::Null => "null".to_string(),
-            _ => "".to_string(),
-        }
-    }
+    /* Composite */
+    Array(usize),
+    Dictionary(usize),
+    File(usize),
+    GState(usize),
+    Save(usize),
+    String(usize),
 }
-
-impl PartialEq for Object {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            Self::Integer(value) => match other {
-                Self::Integer(other_value) => value == other_value,
-                Self::Real(other_value) => f64::from(*value) == *other_value,
-                _ => false,
-            },
-            Self::Real(value) => match other {
-                Self::Integer(other_value) => *value == f64::from(*other_value),
-                Self::Real(other_value) => value == other_value,
-                _ => false,
-            },
-            Self::Boolean(value) => match other {
-                Self::Boolean(other_value) => value == other_value,
-                _ => false,
-            },
-            Self::Name(Name { value, .. }) => match other {
-                Self::Name(Name {
-                    value: other_value, ..
-                }) => value == other_value,
-                _ => false,
-            },
-            Self::Null => matches!(other, Self::Null),
-            Self::Array(Composite { key, .. })
-            | Self::PackedArray(Composite { key, .. })
-            | Self::String(Composite { key, .. })
-            | Self::Dictionary(Composite { key, .. }) => match other {
-                Self::Array(Composite { key: other_key, .. })
-                | Self::PackedArray(Composite { key: other_key, .. })
-                | Self::String(Composite { key: other_key, .. })
-                | Self::Dictionary(Composite { key: other_key, .. }) => key == other_key,
-                _ => false,
-            },
-            _ => false,
-        }
-    }
-}
-
-impl Eq for Object {}
 
 impl Object {
-    pub fn name(&self) -> &str {
+    pub fn mode(&self, ctx: &Context) -> Option<Mode> {
         match self {
-            Self::Integer(..) => "integer",
-            Self::Real(..) => "real",
-            Self::Boolean(..) => "boolean",
-            Self::Name(..) => "name",
-            Self::PackedArray(..) => "packedarray",
-            Self::Array(..) => "array",
-            Self::String(..) => "string",
-            Self::Dictionary(..) => "dictionary",
-            Self::Operator(..) => "operator",
-            Self::File => "file",
-            Self::Mark => "mark",
-            Self::Null => "null",
-            Self::Save => "save",
-            Self::FontId => "fontid",
-            Self::GState => "gstate",
-        }
-    }
+            Self::Name(NameObject { mode, .. }) => Some(*mode),
+            Self::Boolean(_)
+            | Self::FontId
+            | Self::Integer(_)
+            | Self::Mark
+            | Self::Null
+            | Self::Operator(_)
+            | Self::Real(_)
+            | Self::String(_) => Some(Mode::Literal),
+            Self::Array(idx)
+            | Self::Dictionary(idx)
+            | Self::File(idx)
+            | Self::GState(idx)
+            | Self::Save(idx) => {
+                let comp = ctx.mem().get(*idx)?;
 
-    pub fn is_int(&self) -> bool {
-        matches!(self, Self::Integer(..))
-    }
-
-    pub fn is_real(&self) -> bool {
-        matches!(self, Self::Real(..))
-    }
-
-    pub fn is_string(&self) -> bool {
-        matches!(self, Self::String(..))
-    }
-
-    pub fn is_mark(&self) -> bool {
-        matches!(self, Self::Mark)
-    }
-
-    pub fn is_array(&self) -> bool {
-        matches!(self, Self::Array(..))
-    }
-
-    pub fn into_int(&self) -> crate::Result<i32> {
-        match self {
-            Self::Integer(i) => Ok(*i),
-            _ => Err(Error::new(
-                ErrorKind::TypeCheck,
-                format!("expected integer, received {}", self.name()),
-            )),
-        }
-    }
-
-    pub fn into_real(&self) -> crate::Result<f64> {
-        match self {
-            Self::Integer(i) => Ok(f64::from(*i)),
-            Self::Real(r) => Ok(*r),
-            _ => Err(Error::new(
-                ErrorKind::TypeCheck,
-                format!("expected real, received {}", self.name()),
-            )),
-        }
-    }
-
-    pub fn into_usize(&self) -> crate::Result<usize> {
-        match self {
-            Self::Integer(i) => match (*i).try_into() {
-                Ok(u) => Ok(u),
-                Err(_) => Err(Error::from(ErrorKind::RangeCheck)),
+                match comp {
+                    Composite::Array(ArrayObject { mode, .. }) => Some(*mode),
+                    Composite::Dictionary(DictionaryObject { mode, .. }) => Some(*mode),
+                    _ => None,
+                }
             },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected usize")),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Mode {
+    Literal,
+    Executable,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Access {
+    Unlimited,
+    ReadOnly,
+    ExecuteOnly,
+    None,
+}
+
+impl Access {
+    pub fn is_writeable(&self) -> bool {
+        *self == Self::Unlimited
+    }
+
+    pub fn is_readable(&self) -> bool {
+        self.is_writeable() || *self == Self::ReadOnly
+    }
+
+    pub fn is_executable(&self) -> bool {
+        self.is_readable() || *self == Self::ExecuteOnly
+    }
+}
+
+#[derive(Clone)]
+pub enum Composite {
+    Array(ArrayObject),
+    Dictionary(DictionaryObject),
+    String(StringObject),
+}
+
+impl From<ArrayObject> for Composite {
+    fn from(value: ArrayObject) -> Self {
+        Self::Array(value)
+    }
+}
+
+impl From<DictionaryObject> for Composite {
+    fn from(value: DictionaryObject) -> Self {
+        Self::Dictionary(value)
+    }
+}
+
+impl From<StringObject> for Composite {
+    fn from(value: StringObject) -> Self {
+        Self::String(value)
+    }
+}
+
+#[derive(Clone)]
+pub struct ArrayObject {
+    access: Access,
+    mode: Mode,
+    inner: Vec<Object>,
+}
+
+impl ArrayObject {
+    pub fn new<V>(value: V, access: Access, mode: Mode) -> Self
+    where
+        V: Into<Vec<Object>>,
+    {
+        Self {
+            inner: value.into(),
+            access,
+            mode,
         }
     }
 
-    pub fn into_composite(&self) -> crate::Result<Composite> {
-        match self {
-            Self::Array(c) | Self::PackedArray(c) | Self::String(c) | Self::Dictionary(c) => {
-                Ok(c.clone())
-            },
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected composite")),
+    pub fn access(&self) -> Access {
+        self.access
+    }
+}
+
+impl IntoIterator for ArrayObject {
+    type Item = Object;
+    type IntoIter = <Vec<Object> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl TryFrom<Composite> for ArrayObject {
+    type Error = crate::Error;
+
+    fn try_from(value: Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Array(a) => Ok(a),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
         }
+    }
+}
+
+impl<'a> TryFrom<&'a Composite> for &'a ArrayObject {
+    type Error = crate::Error;
+
+    fn try_from(value: &'a Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Array(a) => Ok(a),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DictionaryObject {
+    access: Access,
+    mode: Mode,
+    inner: HashMap<String, Object>,
+}
+
+impl DictionaryObject {
+    pub fn get(&self, key: &str) -> Option<&Object> {
+        self.inner.get(key)
+    }
+}
+
+impl IntoIterator for DictionaryObject {
+    type Item = (String, Object);
+    type IntoIter = <HashMap<String, Object> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.inner.into_iter()
+    }
+}
+
+impl TryFrom<Composite> for DictionaryObject {
+    type Error = crate::Error;
+
+    fn try_from(value: Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Dictionary(d) => Ok(d),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Composite> for &'a DictionaryObject {
+    type Error = crate::Error;
+
+    fn try_from(value: &'a Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Dictionary(d) => Ok(d),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct StringObject {
+    inner: String,
+}
+
+impl From<String> for StringObject {
+    fn from(value: String) -> Self {
+        Self { inner: value }
+    }
+}
+
+impl<'a> From<&'a StringObject> for &'a str {
+    fn from(value: &'a StringObject) -> Self {
+        &value.inner
+    }
+}
+
+impl TryFrom<Composite> for StringObject {
+    type Error = crate::Error;
+
+    fn try_from(value: Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::String(s) => Ok(s),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected string")),
+        }
+    }
+}
+
+impl<'a> TryFrom<&'a Composite> for &'a StringObject {
+    type Error = crate::Error;
+
+    fn try_from(value: &'a Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::String(s) => Ok(s),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected string")),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct NameObject {
+    inner: String,
+    mode: Mode,
+}
+
+impl NameObject {
+    pub fn new<S>(value: S, mode: Mode) -> Self
+    where
+        S: Into<String>,
+    {
+        Self {
+            inner: value.into(),
+            mode,
+        }
+    }
+}
+
+impl<'a> From<&'a NameObject> for &'a str {
+    fn from(value: &'a NameObject) -> Self {
+        &value.inner
+    }
+}
+
+impl PartialEq<str> for NameObject {
+    fn eq(&self, other: &str) -> bool {
+        self.inner == other
     }
 }

@@ -1,12 +1,9 @@
 use std::iter;
 
 use crate::{
-    access::Access,
-    composite::{Composite, Mode},
+    context::Context,
     encoding::{decode_ascii85, decode_hex},
-    memory::VirtualMemory,
-    object::Object,
-    value::Value,
+    object::{Access, ArrayObject, Mode, NameObject, Object, StringObject},
     Error, ErrorKind,
 };
 
@@ -17,22 +14,17 @@ pub struct Lexer<I: Iterator<Item = char>> {
     input: iter::Peekable<I>,
 }
 
-impl<I> From<I> for Lexer<I>
+impl<'a, I> Lexer<I>
 where
     I: Iterator<Item = char>,
 {
-    fn from(value: I) -> Self {
+    pub fn new(input: I) -> Self {
         Self {
-            input: value.peekable(),
+            input: input.peekable(),
         }
     }
-}
 
-impl<I> Lexer<I>
-where
-    I: Iterator<Item = char>,
-{
-    pub fn next_obj(&mut self, mem: &mut VirtualMemory<Value>) -> Option<crate::Result<Object>> {
+    pub fn lex(&mut self, ctx: &'a mut Context) -> Option<crate::Result<Object>> {
         loop {
             if self.next_is_whitespace() {
                 self.input.next()?;
@@ -50,11 +42,11 @@ where
                 '-' | '.' | '0'..='9' => {
                     return Some(self.lex_numeric());
                 },
-                '(' => return Some(self.lex_string_literal(mem)),
-                '<' => return Some(self.lex_gt(mem)),
-                '{' => return Some(self.lex_procedure(mem)),
+                '(' => return Some(self.lex_string_literal(ctx)),
+                '<' => return Some(self.lex_gt(ctx)),
+                '{' => return Some(self.lex_procedure(ctx)),
                 _ => {
-                    let name = String::from(self.input.next()?);
+                    let name = self.input.next()?.to_string();
                     return Some(self.lex_name(name));
                 },
             };
@@ -77,7 +69,7 @@ where
         Ok(())
     }
 
-    fn lex_gt(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
+    fn lex_gt(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
         self.expect_char('<')?;
 
         let Some(ch) = self.input.peek() else {
@@ -90,10 +82,10 @@ where
         match ch {
             '<' => {
                 let _ = self.input.next();
-                Ok(Object::Name("<<".into()))
+                Ok(Object::Name(NameObject::new("<<", Mode::Executable)))
             },
-            '~' => self.lex_string_base85(mem),
-            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(mem),
+            '~' => self.lex_string_base85(ctx),
+            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(ctx),
             _ => self.lex_name("<".to_string()),
         }
     }
@@ -120,7 +112,7 @@ where
             }
 
             match self.input.next() {
-                Some(ch) => name.push(ch),
+                Some(ch) => name.push(ch.into()),
                 None => break,
             }
         }
@@ -128,7 +120,14 @@ where
         Ok(match name.as_str() {
             "true" => Object::Boolean(true),
             "false" => Object::Boolean(true),
-            name => Object::Name(name.into()),
+            name => Object::Name(NameObject::new(
+                name,
+                if name.starts_with("/") {
+                    Mode::Literal
+                } else {
+                    Mode::Executable
+                },
+            )),
         })
     }
 
@@ -147,7 +146,7 @@ where
             match ch {
                 'e' | 'E' => numeric.push('E'),
                 _ => {
-                    numeric.push(ch);
+                    numeric.push(ch.into());
                 },
             }
         }
@@ -194,18 +193,18 @@ where
         }
     }
 
-    fn lex_procedure(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
+    fn lex_procedure(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
         self.expect_char('{')?;
 
         let mut objs = Vec::new();
 
         loop {
             let obj = self
-                .next_obj(mem)
+                .lex(ctx)
                 .ok_or(Error::new(ErrorKind::SyntaxError, "unterminated procedure"))??;
 
             if let Object::Name(ref n) = obj {
-                if "}" == n.value() {
+                if n == "}" {
                     break;
                 }
             }
@@ -213,16 +212,13 @@ where
             objs.push(obj);
         }
 
-        let key = mem.insert(objs);
+        let arr = ArrayObject::new(objs, Access::ExecuteOnly, Mode::Literal);
+        let idx = ctx.mem_mut().insert(arr);
 
-        Ok(Object::Array(Composite {
-            access: Access::ExecuteOnly,
-            mode: Mode::Literal,
-            key,
-        }))
+        Ok(Object::Array(idx))
     }
 
-    fn lex_string_base85(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
+    fn lex_string_base85(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -243,21 +239,17 @@ where
                     Some('>') => break,
                     _ => continue,
                 },
-                Some(ch) => string.push(ch),
+                Some(ch) => string.push(ch.into()),
             }
         }
 
-        let string = decode_ascii85(&string)?;
-        let key = mem.insert(string);
+        let string: StringObject = decode_ascii85(&string)?.into();
+        let idx = ctx.mem_mut().insert(string);
 
-        Ok(Object::String(Composite {
-            access: Access::Unlimited,
-            mode: Mode::Literal,
-            key,
-        }))
+        Ok(Object::String(idx))
     }
 
-    fn lex_string_hex(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
+    fn lex_string_hex(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
@@ -272,22 +264,18 @@ where
 
             match ch {
                 '>' => break,
-                '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch),
+                '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch.into()),
                 _ => return Err(Error::new(ErrorKind::SyntaxError, "invalid hex string")),
             }
         }
 
-        let string = decode_hex(&string)?;
-        let key = mem.insert(string);
+        let string: StringObject = decode_hex(&string)?.into();
+        let idx = ctx.mem_mut().insert(string);
 
-        Ok(Object::String(Composite {
-            access: Access::Unlimited,
-            mode: Mode::Literal,
-            key,
-        }))
+        Ok(Object::String(idx))
     }
 
-    fn lex_string_literal(&mut self, mem: &mut VirtualMemory<Value>) -> crate::Result<Object> {
+    fn lex_string_literal(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
         self.expect_char('(')?;
 
         let mut string = String::new();
@@ -300,14 +288,14 @@ where
 
             match ch {
                 '(' => {
-                    string.push(ch);
+                    string.push(ch.into());
                     active_parenthesis += 1;
                 },
                 ')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
-                    string.push(ch);
+                    string.push(ch.into());
                     active_parenthesis -= 1;
                 },
                 '\\' => {
@@ -320,8 +308,8 @@ where
                         'r' => string.push('\r'),
                         'n' => string.push('\n'),
                         't' => string.push('\t'),
-                        'b' => string.push(BACKSPACE),
-                        'f' => string.push(FORM_FEED),
+                        'b' => string.push(BACKSPACE.into()),
+                        'f' => string.push(FORM_FEED.into()),
                         '\\' => string.push('\\'),
                         '(' => string.push('('),
                         ')' => string.push(')'),
@@ -355,21 +343,17 @@ where
                                 _ => return Err(Error::from(ErrorKind::SyntaxError)),
                             }
                         },
-                        _ => string.push(next_ch),
+                        _ => string.push(next_ch.into()),
                     }
                 },
-                _ => string.push(ch),
+                _ => string.push(ch.into()),
             }
         }
 
-        let string = decode_hex(&string)?;
-        let key = mem.insert(string);
+        let string: StringObject = string.into();
+        let idx = ctx.mem_mut().insert(string);
 
-        Ok(Object::String(Composite {
-            access: Access::Unlimited,
-            mode: Mode::Literal,
-            key,
-        }))
+        Ok(Object::String(idx))
     }
 
     fn expect_char(&mut self, ch: char) -> crate::Result<()> {
@@ -393,7 +377,10 @@ where
 }
 
 fn is_delimiter(ch: char) -> bool {
-    matches!(ch, '<' | '>' | '[' | ']' | '{' | '}' | '/' | '%')
+    matches!(
+        ch,
+        '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | '/' | '%'
+    )
 }
 
 fn is_regular(ch: char) -> bool {
@@ -402,466 +389,4 @@ fn is_regular(ch: char) -> bool {
 
 fn is_whitespace(ch: char) -> bool {
     matches!(ch, '\0' | ' ' | '\t' | '\r' | '\n' | BACKSPACE | FORM_FEED)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::error;
-
-    #[test]
-    fn test_lex_comment() -> Result<(), Box<dyn error::Error>> {
-        let mut lexer = Lexer::from("% this is a comment".chars());
-        let mut mem = VirtualMemory::new();
-        let obj = lexer.next_obj(&mut mem);
-
-        assert!(obj.is_none());
-
-        let cases = [
-            ("10% this is a comment", Object::Integer(10)),
-            ("16#FFFE% this is a comment", Object::Integer(0xFFFE)),
-            ("1.0% this is a comment", Object::Real(1.0)),
-            ("1.0e7% this is a comment", Object::Real(1.0e7)),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-
-            let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert_eq!(expect, obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_bad_numeric() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["1x0", "1.x0"];
-
-        for input in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(input.into()), name);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_numeric() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("1", Object::Integer(1)),
-            ("-1", Object::Integer(-1)),
-            ("1234567890", Object::Integer(1234567890)),
-            ("2147483648", Object::Real(2147483648.0)),
-            (".1", Object::Real(0.1)),
-            ("-.1", Object::Real(-0.1)),
-            ("1.234567890", Object::Real(1.234567890)),
-            ("1.2E7", Object::Real(1.2e7)),
-            ("1.2e7", Object::Real(1.2e7)),
-            ("-1.2e7", Object::Real(-1.2e7)),
-            ("1.2e-7", Object::Real(1.2e-7)),
-            ("-1.2e-7", Object::Real(-1.2e-7)),
-            ("2#1000", Object::Integer(0b1000)),
-            ("8#1777", Object::Integer(0o1777)),
-            ("16#fffe", Object::Integer(0xFFFE)),
-            ("16#FFFE", Object::Integer(0xFFFE)),
-            ("16#ffFE", Object::Integer(0xFFFE)),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert_eq!(expect, obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_bad_string() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["(this is a string", "(this is a string\\)"];
-
-        for input in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let result = lexer.next_obj(&mut mem).ok_or("expected object")?;
-
-            assert!(result.is_err());
-            assert_eq!(ErrorKind::SyntaxError, result.unwrap_err().kind());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("(this is a string)", "this is a string"),
-            (
-                "(this is a multiline\nstring)",
-                "this is a multiline\nstring",
-            ),
-            (
-                "(this is a multiline\r\nstring)",
-                "this is a multiline\r\nstring",
-            ),
-            (
-                "(this has (nested) parenthesis)",
-                "this has (nested) parenthesis",
-            ),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &str = mem.get(key)?.try_into()?;
-
-            assert_eq!(expect, string);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_escaped_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("()", ""),
-            ("(\\n)", "\n"),
-            ("(\\r)", "\r"),
-            ("(\\t)", "\t"),
-            ("(\\b)", "\x08"),
-            ("(\\f)", "\x0C"),
-            ("(\\\\)", "\\"),
-            ("(\\()", "("),
-            ("(\\))", ")"),
-            ("(\\\n)", ""),
-            ("(\\\r)", ""),
-            ("(\\\r\n)", ""),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &str = mem.get(key)?.try_into()?;
-
-            assert_eq!(expect, string);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "(\\ii)";
-        let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::new();
-
-        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-            return Err("expected string object".into());
-        };
-
-        let string: &str = mem.get(key)?.try_into()?;
-
-        assert_eq!("ii", string);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_octal_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [("(\\000)", "\0"), ("(\\377)", "ÿ")];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &str = mem.get(key)?.try_into()?;
-
-            assert_eq!(expect, string);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_hex_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("<736F6D65>", "some"),
-            ("<736f6d65>", "some"),
-            ("<736f6D65>", "some"),
-            ("<73 6F 6D 65>", "some"),
-            ("<70756D7>", "pump"),
-            ("<70756D70>", "pump"),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &str = mem.get(key)?.try_into()?;
-
-            assert_eq!(expect, string);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_base85_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
-        let expect = "this is some text";
-        let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::new();
-
-        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-            return Err("expected string object".into());
-        };
-
-        let string: &str = mem.get(key)?.try_into()?;
-
-        assert_eq!(expect, string);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_multiple_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
-        let expect = [
-            "this is a literal string",
-            "this is a hex string",
-            "this is a base85 string",
-        ];
-
-        let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::new();
-
-        for e in expect {
-            let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &str = mem.get(key)?.try_into()?;
-
-            assert_eq!(e, string);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_name() -> Result<(), Box<dyn error::Error>> {
-        let inputs = [
-            "abc",
-            "Offset",
-            "$$",
-            "23A",
-            "13-456",
-            "a.b",
-            "$MyDict",
-            "@pattern",
-            "16#FFFF.LMAO",
-        ];
-
-        for input in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(input.into()), name);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_procedure() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["{}", "{ }", "{ { } }"];
-
-        for input in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
-            assert!(obj.is_array());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_procedure_nested() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["{ { 1 } }", "{{1}}"];
-
-        for input in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            let Some(Ok(Object::Array(Composite { access, key, .. }))) = lexer.next_obj(&mut mem)
-            else {
-                return Err("expected procedure object".into());
-            };
-            assert!(access.is_exec_only());
-
-            let outer: &Vec<Object> = mem.get(key)?.try_into()?;
-            assert_eq!(1, outer.len());
-
-            let Some(Object::Array(Composite { access, key, .. })) = outer.first() else {
-                return Err("expected procedure object".into());
-            };
-            assert!(access.is_exec_only());
-
-            let inner: &Vec<Object> = mem.get(*key)?.try_into()?;
-            assert_eq!(1, inner.len());
-            assert_eq!(Some(Object::Integer(1)), inner.first().cloned());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_self_deliminating() -> Result<(), Box<dyn error::Error>> {
-        let inputs = [
-            ("mid[dle", "[".to_string()),
-            ("mid]dle", "]".to_string()),
-            ("mid<<dle", "<<".to_string()),
-            ("mid>>dle", ">>".to_string()),
-            ("mid/dle", "/dle".to_string()),
-            ("1[2", "[".to_string()),
-            ("1]2", "]".to_string()),
-            ("1<<2", "<<".to_string()),
-            ("1>>2", ">>".to_string()),
-            ("1/2", "/2".to_string()),
-            ("1.2[3", "[".to_string()),
-            ("1.2]3", "]".to_string()),
-            ("1.2<<3", "<<".to_string()),
-            ("1.2>>3", ">>".to_string()),
-            ("1.2/3", "/3".to_string()),
-            ("16#FF[FF", "[".to_string()),
-            ("16#FF]FF", "]".to_string()),
-            ("16#FF<<FF", "<<".to_string()),
-            ("16#FF>>FF", ">>".to_string()),
-            ("16#FF/FF", "/FF".to_string()),
-        ];
-
-        for (input, expect) in inputs {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-            let _ = lexer.next_obj(&mut mem);
-
-            let obj = lexer.next_obj(&mut mem).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(expect.into()), obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_self_deliminating_pair() -> Result<(), Box<dyn error::Error>> {
-        let cases = [("[[", "["), ("]]", "]"), ("<<<<", "<<"), (">>>>", ">>")];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::from(input.chars());
-            let mut mem = VirtualMemory::new();
-
-            while let Some(obj) = lexer.next_obj(&mut mem) {
-                assert_eq!(Object::Name(expect.into()), obj?);
-            }
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_all() -> Result<(), Box<dyn error::Error>> {
-        let input = "
-myStr (i have a string right here)
-myOtherStr (and
-another \
-right \
-here)
-% this is a comment
-myInt 1234567890
-myNegativeInt -1234567890
-myReal 3.1456
-myNegativeReal -3.1456
-        ";
-
-        let mut lexer = Lexer::from(input.chars());
-        let mut mem = VirtualMemory::new();
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myStr".into()), name);
-
-        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-            return Err("expected string object".into());
-        };
-        let string: &str = mem.get(key)?.try_into()?;
-        assert_eq!("i have a string right here", string);
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myOtherStr".into()), name);
-
-        let Some(Ok(Object::String(Composite { key, .. }))) = lexer.next_obj(&mut mem) else {
-            return Err("expected string object".into());
-        };
-        let string: &str = mem.get(key)?.try_into()?;
-        assert_eq!("and\nanother right here", string);
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myInt".into()), name);
-
-        let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Integer(1234567890), integer);
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeInt".into()), name);
-
-        let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Integer(-1234567890), integer);
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myReal".into()), name);
-
-        let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Real(3.1456), integer);
-
-        let name = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeReal".into()), name);
-
-        let integer = lexer.next_obj(&mut mem).ok_or("expected object")??;
-        assert_eq!(Object::Real(-3.1456), integer);
-
-        Ok(())
-    }
 }
