@@ -1,9 +1,10 @@
-use std::io;
+use std::{collections::HashMap, f64::consts, io};
 
 pub use context::Context;
 pub use error::{Error, ErrorKind};
 use lexer::Lexer;
-use object::{Access, ArrayObject, DictionaryObject, Mode, Object, StringObject};
+use object::{Access, Composite, DictionaryObject, Mode};
+pub use object::{ArrayObject, Object, StringObject};
 
 mod container;
 mod context;
@@ -12,6 +13,7 @@ mod error;
 mod lexer;
 mod object;
 mod rand;
+mod stack_operator;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -155,4 +157,36 @@ fn write_object(writer: &mut impl io::Write, ctx: &Context, obj: &Object) -> io:
         Object::Null => writer.write(b"null"),
         _ => Ok(0),
     }
+}
+
+fn radians_to_degrees(radians: f64) -> f64 {
+    radians * (180.0 / consts::PI)
+}
+
+fn degrees_to_radians(degrees: f64) -> f64 {
+    (degrees * consts::PI) / 180.0
+}
+
+fn positive_degrees(degrees: f64) -> f64 {
+    if degrees < 0.0 {
+        360.0 + degrees
+    } else {
+        degrees
+    }
+}
+
+fn usize_to_i32(u: usize) -> crate::Result<i32> {
+    let i: i32 = match u.try_into() {
+        Ok(i) => Ok(i),
+        Err(_) => Err(Error::new(
+            ErrorKind::Unregistered,
+            "failed to convert usize to int",
+        )),
+    }?;
+
+    Ok(i)
+}
+
+fn is_valid_real(n: f64) -> bool {
+    n.is_finite() && !n.is_nan()
 }

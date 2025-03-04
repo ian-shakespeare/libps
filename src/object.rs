@@ -1,8 +1,8 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, slice::SliceIndex};
 
 use crate::{context::Context, Error, ErrorKind};
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Object {
     /* Simple */
     Boolean(bool),
@@ -52,13 +52,13 @@ impl Object {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mode {
     Literal,
     Executable,
 }
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Access {
     Unlimited,
     ReadOnly,
@@ -78,9 +78,13 @@ impl Access {
     pub fn is_executable(&self) -> bool {
         self.is_readable() || *self == Self::ExecuteOnly
     }
+
+    pub fn is_exec_only(&self) -> bool {
+        *self == Self::ExecuteOnly
+    }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum Composite {
     Array(ArrayObject),
     Dictionary(DictionaryObject),
@@ -105,7 +109,7 @@ impl From<StringObject> for Composite {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ArrayObject {
     access: Access,
     mode: Mode,
@@ -126,6 +130,22 @@ impl ArrayObject {
 
     pub fn access(&self) -> Access {
         self.access
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn get(&self, index: usize) -> crate::Result<&Object> {
+        self.inner
+            .get(index)
+            .ok_or(Error::from(ErrorKind::RangeCheck))
+    }
+
+    pub fn get_mut(&mut self, index: usize) -> crate::Result<&mut Object> {
+        self.inner
+            .get_mut(index)
+            .ok_or(Error::from(ErrorKind::RangeCheck))
     }
 }
 
@@ -160,7 +180,18 @@ impl<'a> TryFrom<&'a Composite> for &'a ArrayObject {
     }
 }
 
-#[derive(Clone)]
+impl<'a> TryFrom<&'a mut Composite> for &'a mut ArrayObject {
+    type Error = crate::Error;
+
+    fn try_from(value: &'a mut Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Array(a) => Ok(a),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct DictionaryObject {
     access: Access,
     mode: Mode,
@@ -168,8 +199,20 @@ pub struct DictionaryObject {
 }
 
 impl DictionaryObject {
+    pub fn new(value: HashMap<String, Object>, access: Access, mode: Mode) -> Self {
+        Self {
+            inner: value,
+            access,
+            mode,
+        }
+    }
+
     pub fn get(&self, key: &str) -> Option<&Object> {
         self.inner.get(key)
+    }
+
+    pub fn insert(&mut self, key: String, obj: Object) {
+        self.inner.insert(key, obj);
     }
 }
 
@@ -204,7 +247,18 @@ impl<'a> TryFrom<&'a Composite> for &'a DictionaryObject {
     }
 }
 
-#[derive(Clone)]
+impl<'a> TryFrom<&'a mut Composite> for &'a mut DictionaryObject {
+    type Error = crate::Error;
+
+    fn try_from(value: &'a mut Composite) -> Result<Self, Self::Error> {
+        match value {
+            Composite::Dictionary(d) => Ok(d),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct StringObject {
     inner: String,
 }
@@ -218,6 +272,12 @@ impl From<String> for StringObject {
 impl<'a> From<&'a StringObject> for &'a str {
     fn from(value: &'a StringObject) -> Self {
         &value.inner
+    }
+}
+
+impl PartialEq<str> for StringObject {
+    fn eq(&self, other: &str) -> bool {
+        self.inner == other
     }
 }
 
@@ -243,7 +303,7 @@ impl<'a> TryFrom<&'a Composite> for &'a StringObject {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct NameObject {
     inner: String,
     mode: Mode,
@@ -267,8 +327,23 @@ impl<'a> From<&'a NameObject> for &'a str {
     }
 }
 
+impl<'a> From<&'a str> for NameObject {
+    fn from(value: &'a str) -> Self {
+        Self {
+            inner: value.to_string(),
+            mode: Mode::Executable,
+        }
+    }
+}
+
 impl PartialEq<str> for NameObject {
     fn eq(&self, other: &str) -> bool {
         self.inner == other
+    }
+}
+
+impl PartialEq<NameObject> for NameObject {
+    fn eq(&self, other: &NameObject) -> bool {
+        self.inner == other.inner
     }
 }
