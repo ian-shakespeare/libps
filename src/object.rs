@@ -1,4 +1,4 @@
-use std::{collections::HashMap, slice::SliceIndex};
+use std::collections::HashMap;
 
 use crate::{context::Context, Error, ErrorKind};
 
@@ -24,6 +24,66 @@ pub enum Object {
 }
 
 impl Object {
+    pub fn into_index(self) -> crate::Result<usize> {
+        match self {
+            Object::Array(idx)
+            | Object::Dictionary(idx)
+            | Object::File(idx)
+            | Object::GState(idx)
+            | Object::Save(idx)
+            | Object::String(idx) => Ok(idx),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected composite")),
+        }
+    }
+
+    pub fn into_int(self) -> crate::Result<i32> {
+        match self {
+            Self::Integer(i) => Ok(i),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected int")),
+        }
+    }
+
+    pub fn into_real(self) -> crate::Result<f64> {
+        match self {
+            Self::Integer(i) => Ok(f64::from(i)),
+            Self::Real(r) => Ok(r),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+        }
+    }
+
+    pub fn into_usize(self) -> crate::Result<usize> {
+        let u: usize = self
+            .into_int()?
+            .try_into()
+            .or(Err(Error::from(ErrorKind::RangeCheck)))?;
+
+        Ok(u)
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self, Self::Array(..))
+    }
+
+    pub fn is_int(&self) -> bool {
+        matches!(self, Self::Integer(..))
+    }
+
+    pub fn is_name(&self) -> bool {
+        matches!(self, Self::Name(..))
+    }
+
+    pub fn is_numeric(&self) -> bool {
+        self.is_int() || self.is_real()
+    }
+
+    pub fn is_real(&self) -> bool {
+        matches!(self, Self::Real(..))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self, Self::String(..))
+    }
+
     pub fn mode(&self, ctx: &Context) -> Option<Mode> {
         match self {
             Self::Name(NameObject { mode, .. }) => Some(*mode),
@@ -207,8 +267,14 @@ impl DictionaryObject {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<&Object> {
-        self.inner.get(key)
+    pub fn access(&self) -> Access {
+        self.access
+    }
+
+    pub fn get(&self, key: &str) -> crate::Result<&Object> {
+        self.inner
+            .get(key)
+            .ok_or(Error::new(ErrorKind::Undefined, key))
     }
 
     pub fn insert(&mut self, key: String, obj: Object) {
@@ -272,6 +338,12 @@ impl From<String> for StringObject {
 impl<'a> From<&'a StringObject> for &'a str {
     fn from(value: &'a StringObject) -> Self {
         &value.inner
+    }
+}
+
+impl PartialEq for StringObject {
+    fn eq(&self, other: &Self) -> bool {
+        self.inner == other.inner
     }
 }
 

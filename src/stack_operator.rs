@@ -1,4 +1,4 @@
-use crate::{ArrayObject, Context, Error, ErrorKind, Object};
+use crate::{Context, Error, ErrorKind, Object};
 
 use super::usize_to_i32;
 

@@ -1,18 +1,21 @@
-use std::{collections::HashMap, f64::consts, io};
+use std::{f64::consts, io};
 
 pub use context::Context;
 pub use error::{Error, ErrorKind};
 use lexer::Lexer;
-use object::{Access, Composite, DictionaryObject, Mode};
+use object::{Access, DictionaryObject, Mode};
 pub use object::{ArrayObject, Object, StringObject};
 
+mod array_operator;
 mod container;
 mod context;
 mod encoding;
 mod error;
 mod lexer;
+mod math_operator;
 mod object;
 mod rand;
+mod relational_operator;
 mod stack_operator;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
@@ -42,12 +45,7 @@ fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
             Ok(())
         },
         Object::Array(idx) => {
-            let array: ArrayObject = ctx
-                .mem()
-                .get(idx)
-                .ok_or(Error::from(ErrorKind::VmError))?
-                .clone()
-                .try_into()?;
+            let array = ctx.get_array(idx)?.clone();
 
             if !array.access().is_executable() {
                 return Err(Error::from(ErrorKind::InvalidAccess));
