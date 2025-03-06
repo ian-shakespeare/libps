@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use crate::{context::Context, Error, ErrorKind};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Object {
     /* Simple */
     Boolean(bool),
@@ -39,7 +39,26 @@ impl Object {
     pub fn into_int(self) -> crate::Result<i32> {
         match self {
             Self::Integer(i) => Ok(i),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected int")),
+            _ => {
+                let received: &str = self.into();
+                Err(Error::new(
+                    ErrorKind::TypeCheck,
+                    format!("expected int, received {received}"),
+                ))
+            },
+        }
+    }
+
+    pub fn into_name(self) -> crate::Result<NameObject> {
+        match self {
+            Self::Name(n) => Ok(n),
+            _ => {
+                let received: &str = self.into();
+                Err(Error::new(
+                    ErrorKind::TypeCheck,
+                    format!("expected name, received {received}"),
+                ))
+            },
         }
     }
 
@@ -47,7 +66,13 @@ impl Object {
         match self {
             Self::Integer(i) => Ok(f64::from(i)),
             Self::Real(r) => Ok(r),
-            _ => Err(Error::new(ErrorKind::TypeCheck, "expected real")),
+            _ => {
+                let received: &str = self.into();
+                Err(Error::new(
+                    ErrorKind::TypeCheck,
+                    format!("expected real, received {received}"),
+                ))
+            },
         }
     }
 
@@ -68,6 +93,10 @@ impl Object {
         matches!(self, Self::Integer(..))
     }
 
+    pub fn is_mark(&self) -> bool {
+        matches!(self, Self::Mark)
+    }
+
     pub fn is_name(&self) -> bool {
         matches!(self, Self::Name(..))
     }
@@ -84,42 +113,84 @@ impl Object {
         matches!(self, Self::String(..))
     }
 
-    pub fn mode(&self, ctx: &Context) -> Option<Mode> {
+    pub fn mode(&self, ctx: &Context) -> crate::Result<Mode> {
         match self {
-            Self::Name(NameObject { mode, .. }) => Some(*mode),
-            Self::Boolean(_)
-            | Self::FontId
-            | Self::Integer(_)
-            | Self::Mark
-            | Self::Null
-            | Self::Operator(_)
-            | Self::Real(_)
-            | Self::String(_) => Some(Mode::Literal),
+            Self::Name(NameObject { mode, .. }) => Ok(*mode),
             Self::Array(idx)
             | Self::Dictionary(idx)
             | Self::File(idx)
             | Self::GState(idx)
             | Self::Save(idx) => {
-                let comp = ctx.mem().get(*idx)?;
+                let comp = ctx.mem().get(*idx).ok_or(Error::from(ErrorKind::VmError))?;
 
                 match comp {
-                    Composite::Array(ArrayObject { mode, .. }) => Some(*mode),
-                    Composite::Dictionary(DictionaryObject { mode, .. }) => Some(*mode),
-                    _ => None,
+                    Composite::Array(ArrayObject { mode, .. }) => Ok(*mode),
+                    Composite::Dictionary(DictionaryObject { mode, .. }) => Ok(*mode),
+                    _ => Ok(Mode::default()),
                 }
             },
+            _ => Ok(Mode::default()),
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Mode {
-    Literal,
-    Executable,
+impl From<Object> for &'static str {
+    fn from(value: Object) -> Self {
+        match value {
+            Object::Boolean(_) => "booleantype",
+            Object::FontId => "fonttype",
+            Object::Integer(_) => "integertype",
+            Object::Mark => "marktype",
+            Object::Name(_) => "nametype",
+            Object::Null => "nulltype",
+            Object::Operator(_) => "operatortype",
+            Object::Real(_) => "realtype",
+            Object::Array(_) => "arraytype",
+            Object::Dictionary(_) => "dicttype",
+            Object::File(_) => "filetype",
+            Object::GState(_) => "gstatetype",
+            Object::Save(_) => "savetype",
+            Object::String(_) => "stringtype",
+        }
+    }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+impl PartialEq for Object {
+    fn eq(&self, other: &Self) -> bool {
+        if self.is_numeric() && other.is_numeric() {
+            let Ok(lhs) = self.clone().into_real() else {
+                return false;
+            };
+            let Ok(rhs) = other.clone().into_real() else {
+                return false;
+            };
+
+            return lhs == rhs;
+        }
+
+        match (self, other) {
+            (Object::Boolean(lhs), Object::Boolean(rhs)) => lhs == rhs,
+            (Object::String(lhs), Object::String(rhs)) => lhs == rhs,
+            (Object::Name(lhs), Object::Name(rhs)) => lhs == rhs,
+            (Object::Array(lhs), Object::Array(rhs)) => lhs == rhs,
+            (Object::Dictionary(lhs), Object::Dictionary(rhs)) => lhs == rhs,
+            (Object::Mark, Object::Mark) => true,
+            (Object::Null, Object::Null) => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum Mode {
+    #[default]
+    Executable,
+    Literal,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Access {
+    #[default]
     Unlimited,
     ReadOnly,
     ExecuteOnly,
@@ -172,7 +243,7 @@ impl From<StringObject> for Composite {
 #[derive(Clone, Debug)]
 pub struct ArrayObject {
     access: Access,
-    mode: Mode,
+    pub mode: Mode,
     inner: Vec<Object>,
 }
 
@@ -194,6 +265,10 @@ impl ArrayObject {
 
     pub fn len(&self) -> usize {
         self.inner.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 
     pub fn get(&self, index: usize) -> crate::Result<&Object> {
@@ -251,11 +326,11 @@ impl<'a> TryFrom<&'a mut Composite> for &'a mut ArrayObject {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct DictionaryObject {
     access: Access,
-    mode: Mode,
     inner: HashMap<String, Object>,
+    mode: Mode,
 }
 
 impl DictionaryObject {
@@ -264,6 +339,14 @@ impl DictionaryObject {
             inner: value,
             access,
             mode,
+        }
+    }
+
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self {
+            access: Access::default(),
+            inner: HashMap::with_capacity(capacity),
+            mode: Mode::default(),
         }
     }
 
@@ -277,8 +360,30 @@ impl DictionaryObject {
             .ok_or(Error::new(ErrorKind::Undefined, key))
     }
 
-    pub fn insert(&mut self, key: String, obj: Object) {
-        self.inner.insert(key, obj);
+    pub fn insert(&mut self, key: String, obj: Object) -> Option<Object> {
+        self.inner.insert(key, obj)
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.inner.contains_key(key)
+    }
+
+    pub fn remove(&mut self, key: &str) -> Option<Object> {
+        self.inner.remove(key)
+    }
+}
+
+impl From<HashMap<String, Object>> for DictionaryObject {
+    fn from(value: HashMap<String, Object>) -> Self {
+        Self {
+            access: Access::default(),
+            mode: Mode::default(),
+            inner: value,
+        }
     }
 }
 
@@ -390,6 +495,12 @@ impl NameObject {
             inner: value.into(),
             mode,
         }
+    }
+}
+
+impl AsRef<str> for NameObject {
+    fn as_ref(&self) -> &str {
+        &self.inner
     }
 }
 

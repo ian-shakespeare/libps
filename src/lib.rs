@@ -6,17 +6,21 @@ use lexer::Lexer;
 use object::{Access, DictionaryObject, Mode};
 pub use object::{ArrayObject, Object, StringObject};
 
-mod array_operator;
+mod array_operators;
 mod container;
 mod context;
+mod debug_operators;
+mod dict_operators;
 mod encoding;
 mod error;
 mod lexer;
-mod math_operator;
+mod math_operators;
+mod misc_operators;
 mod object;
 mod rand;
-mod relational_operator;
-mod stack_operator;
+mod relational_operators;
+mod stack_operators;
+mod type_operators;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -26,8 +30,8 @@ pub fn evaluate(ctx: &mut Context, input: &str) -> crate::Result<()> {
     while let Some(obj) = lexer.lex(ctx) {
         let obj = obj?;
 
-        if let Some(Mode::Literal) = obj.mode(ctx) {
-            ctx.operand_stack.push(obj);
+        if obj.is_array() && obj.mode(ctx)? == Mode::Executable {
+            ctx.push(obj);
             continue;
         }
 
@@ -38,6 +42,11 @@ pub fn evaluate(ctx: &mut Context, input: &str) -> crate::Result<()> {
 }
 
 fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
+    if obj.mode(ctx)? == Mode::Literal {
+        ctx.operand_stack.push(obj);
+        return Ok(());
+    }
+
     match obj {
         Object::Boolean(_) | Object::Integer(_) | Object::Real(_) | Object::String(_) => {
             ctx.operand_stack.push(obj);
@@ -57,7 +66,7 @@ fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
 
             Ok(())
         },
-        Object::Name(name) => execute_object(ctx, ctx.find_def(&name)?.clone()),
+        Object::Name(name) => execute_object(ctx, ctx.find_def(name)?.clone()),
         Object::Operator(operator) => operator(ctx),
         _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
     }

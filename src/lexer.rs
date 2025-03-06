@@ -112,23 +112,17 @@ where
             }
 
             match self.input.next() {
-                Some(ch) => name.push(ch.into()),
+                Some(ch) => name.push(ch),
                 None => break,
             }
         }
 
-        Ok(match name.as_str() {
-            "true" => Object::Boolean(true),
-            "false" => Object::Boolean(true),
-            name => Object::Name(NameObject::new(
-                name,
-                if name.starts_with("/") {
-                    Mode::Literal
-                } else {
-                    Mode::Executable
-                },
-            )),
-        })
+        if name.starts_with('/') {
+            name.remove(0);
+            Ok(Object::Name(NameObject::new(name, Mode::Literal)))
+        } else {
+            Ok(Object::Name(NameObject::new(name, Mode::Executable)))
+        }
     }
 
     fn lex_numeric(&mut self) -> crate::Result<Object> {
@@ -146,7 +140,7 @@ where
             match ch {
                 'e' | 'E' => numeric.push('E'),
                 _ => {
-                    numeric.push(ch.into());
+                    numeric.push(ch);
                 },
             }
         }
@@ -212,7 +206,7 @@ where
             objs.push(obj);
         }
 
-        let arr = ArrayObject::new(objs, Access::ExecuteOnly, Mode::Literal);
+        let arr = ArrayObject::new(objs, Access::ExecuteOnly, Mode::Executable);
         let idx = ctx.mem_mut().insert(arr);
 
         Ok(Object::Array(idx))
@@ -239,7 +233,7 @@ where
                     Some('>') => break,
                     _ => continue,
                 },
-                Some(ch) => string.push(ch.into()),
+                Some(ch) => string.push(ch),
             }
         }
 
@@ -264,7 +258,7 @@ where
 
             match ch {
                 '>' => break,
-                '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch.into()),
+                '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch),
                 _ => return Err(Error::new(ErrorKind::SyntaxError, "invalid hex string")),
             }
         }
@@ -288,14 +282,14 @@ where
 
             match ch {
                 '(' => {
-                    string.push(ch.into());
+                    string.push(ch);
                     active_parenthesis += 1;
                 },
                 ')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
-                    string.push(ch.into());
+                    string.push(ch);
                     active_parenthesis -= 1;
                 },
                 '\\' => {
@@ -308,8 +302,8 @@ where
                         'r' => string.push('\r'),
                         'n' => string.push('\n'),
                         't' => string.push('\t'),
-                        'b' => string.push(BACKSPACE.into()),
-                        'f' => string.push(FORM_FEED.into()),
+                        'b' => string.push(BACKSPACE),
+                        'f' => string.push(FORM_FEED),
                         '\\' => string.push('\\'),
                         '(' => string.push('('),
                         ')' => string.push(')'),
@@ -343,10 +337,10 @@ where
                                 _ => return Err(Error::from(ErrorKind::SyntaxError)),
                             }
                         },
-                        _ => string.push(next_ch.into()),
+                        _ => string.push(next_ch),
                     }
                 },
-                _ => string.push(ch.into()),
+                _ => string.push(ch),
             }
         }
 
@@ -778,22 +772,22 @@ mod tests {
             ("mid]dle", "]"),
             ("mid<<dle", "<<"),
             ("mid>>dle", ">>"),
-            ("mid/dle", "/dle"),
+            ("mid/dle", "dle"),
             ("1[2", "["),
             ("1]2", "]"),
             ("1<<2", "<<"),
             ("1>>2", ">>"),
-            ("1/2", "/2"),
+            ("1/2", "2"),
             ("1.2[3", "["),
             ("1.2]3", "]"),
             ("1.2<<3", "<<"),
             ("1.2>>3", ">>"),
-            ("1.2/3", "/3"),
+            ("1.2/3", "3"),
             ("16#FF[FF", "["),
             ("16#FF]FF", "]"),
             ("16#FF<<FF", "<<"),
             ("16#FF>>FF", ">>"),
-            ("16#FF/FF", "/FF"),
+            ("16#FF/FF", "FF"),
         ];
 
         for (input, expect) in inputs {

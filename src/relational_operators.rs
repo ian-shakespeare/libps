@@ -4,14 +4,6 @@ pub fn eq(ctx: &mut Context) -> crate::Result<()> {
     let rhs = ctx.pop()?;
     let lhs = ctx.pop()?;
 
-    if lhs.is_numeric() && rhs.is_numeric() {
-        let lhs = lhs.into_real()?;
-        let rhs = rhs.into_real()?;
-
-        ctx.push(Object::Boolean(lhs == rhs));
-        return Ok(());
-    }
-
     match (lhs, rhs) {
         (Object::String(lhs), Object::String(rhs)) => {
             let lhs = ctx.get_string(lhs)?;
@@ -31,11 +23,20 @@ pub fn eq(ctx: &mut Context) -> crate::Result<()> {
 
             ctx.push(Object::Boolean(lhs == rhs))
         },
-        (Object::Name(lhs), Object::Name(rhs)) => ctx.push(Object::Boolean(lhs == rhs)),
-        (Object::Array(lhs), Object::Array(rhs)) => ctx.push(Object::Boolean(lhs == rhs)),
-        (Object::Dictionary(lhs), Object::Dictionary(rhs)) => ctx.push(Object::Boolean(lhs == rhs)),
-        _ => ctx.push(Object::Boolean(false)),
+        (lhs, rhs) => ctx.push(Object::Boolean(lhs == rhs)),
     }
+
+    Ok(())
+}
+
+pub fn pushtrue(ctx: &mut Context) -> crate::Result<()> {
+    ctx.push(Object::Boolean(true));
+
+    Ok(())
+}
+
+pub fn pushfalse(ctx: &mut Context) -> crate::Result<()> {
+    ctx.push(Object::Boolean(true));
 
     Ok(())
 }

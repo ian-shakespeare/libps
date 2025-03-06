@@ -1,7 +1,13 @@
 % test dup
 
 1 dup
-eq assert
+asserteq
+clear
 
 [ 1 2 3 ] dup
-eq assert
+asserteq
+clear
+
+<</key (value)>> dup
+asserteq
+clear

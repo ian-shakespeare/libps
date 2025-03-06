@@ -1,13 +1,17 @@
 use std::collections::HashMap;
 
 use crate::{
-    array_operator::*,
+    array_operators::*,
     container::Container,
-    math_operator::*,
+    debug_operators::*,
+    dict_operators::*,
+    math_operators::*,
+    misc_operators::*,
     object::{Access, Composite, DictionaryObject, Mode, Object},
     rand::RandomNumberGenerator,
-    relational_operator::*,
-    stack_operator::*,
+    relational_operators::*,
+    stack_operators::*,
+    type_operators::*,
     ArrayObject, Error, ErrorKind, StringObject,
 };
 
@@ -18,19 +22,30 @@ pub struct Context {
     pub is_packing: bool,
     local_mem: Container<Composite>,
     global_mem: Container<Composite>,
-    dict_stack: Vec<usize>,
+    pub dict_stack: Vec<usize>,
 }
 
 impl Default for Context {
     fn default() -> Self {
         let mut local_mem: Container<Composite> = Container::default();
-        let system_dict = local_mem.insert(system_dict());
-        let global_dict = local_mem.insert(DictionaryObject::new(
+
+        let system_dict = system_operators().fold(HashMap::new(), |mut dict, (key, op)| {
+            dict.insert(key.to_string(), Object::Operator(op));
+            dict
+        });
+        let system_idx = local_mem.insert(DictionaryObject::new(
+            system_dict,
+            Access::ExecuteOnly,
+            Mode::Executable,
+        ));
+
+        let global_idx = local_mem.insert(DictionaryObject::new(
             HashMap::new(),
             Access::Unlimited,
             Mode::Executable,
         ));
-        let user_dict = local_mem.insert(DictionaryObject::new(
+
+        let user_idx = local_mem.insert(DictionaryObject::new(
             HashMap::new(),
             Access::Unlimited,
             Mode::Executable,
@@ -41,44 +56,83 @@ impl Default for Context {
             operand_stack: Vec::default(),
             global_mem: Container::default(),
             is_packing: false,
-            dict_stack: vec![system_dict, global_dict, user_dict],
+            dict_stack: vec![system_idx, global_idx, user_idx],
             local_mem,
         }
     }
 }
 
-impl<'a> Context {
-    pub fn with_test_utils() -> Self {
+impl Context {
+    pub fn with_debug_utils() -> Self {
         let mut ctx = Context::default();
 
         let global_dict = ctx
             .get_dict_mut(ctx.dict_stack[1])
             .expect("failed to get global dict");
-        global_dict.insert(
-            "assert".to_string(),
-            Object::Operator(|ctx| {
-                assert!(ctx.pop_bool()?);
 
-                Ok(())
-            }),
-        );
+        for (key, op) in debug_operators() {
+            global_dict.insert(key.to_string(), Object::Operator(op));
+        }
 
         ctx
     }
 
-    pub fn find_def<S>(&'a self, key: S) -> crate::Result<&'a Object>
+    pub fn find_def<S>(&self, key: S) -> crate::Result<&Object>
     where
-        S: Into<&'a str>,
+        S: AsRef<str>,
     {
-        let key: &str = key.into();
+        let key = key.as_ref();
 
         for idx in self.dict_stack.iter().rev() {
-            if let Some(comp) = self.mem().get(*idx) {
-                let dict: &DictionaryObject = comp.try_into()?;
-
-                if dict.get(key).is_ok() {
+            if let Ok(dict) = self.get_dict(*idx) {
+                if dict.contains_key(key) {
                     return dict.get(key);
                 }
+            }
+        }
+
+        Err(Error::new(ErrorKind::Undefined, key))
+    }
+
+    pub fn find_dict<S>(&self, key: S) -> crate::Result<&DictionaryObject>
+    where
+        S: AsRef<str>,
+    {
+        let key = key.as_ref();
+
+        for idx in self.dict_stack.iter().rev() {
+            if self.get_dict(*idx).is_ok_and(|d| d.contains_key(key)) {
+                return self.get_dict(*idx);
+            }
+        }
+
+        Err(Error::new(ErrorKind::Undefined, key))
+    }
+
+    pub fn find_dict_mut<S>(&mut self, key: S) -> crate::Result<&mut DictionaryObject>
+    where
+        S: AsRef<str>,
+    {
+        let key = key.as_ref();
+
+        for idx in self.dict_stack.iter().rev() {
+            if self.get_dict(*idx).is_ok_and(|d| d.contains_key(key)) {
+                return self.get_dict_mut(*idx);
+            }
+        }
+
+        Err(Error::new(ErrorKind::Undefined, key))
+    }
+
+    pub fn find_index<S>(&self, key: S) -> crate::Result<usize>
+    where
+        S: AsRef<str>,
+    {
+        let key = key.as_ref();
+
+        for idx in self.dict_stack.iter().rev() {
+            if self.get_dict(*idx).is_ok_and(|d| d.contains_key(key)) {
+                return Ok(*idx);
             }
         }
 
@@ -146,9 +200,17 @@ impl<'a> Context {
     }
 
     pub fn pop(&mut self) -> crate::Result<Object> {
-        self.operand_stack
+        let obj = self
+            .operand_stack
             .pop()
-            .ok_or(Error::from(ErrorKind::StackUnderflow))
+            .ok_or(Error::from(ErrorKind::StackUnderflow))?;
+
+        if obj.is_name() && obj.mode(self)? == Mode::Executable {
+            let name = obj.into_name()?;
+            return self.find_def(name).cloned();
+        }
+
+        Ok(obj)
     }
 
     pub fn pop_array(&mut self) -> crate::Result<&ArrayObject> {
@@ -174,6 +236,17 @@ impl<'a> Context {
         match self.pop()? {
             Object::Dictionary(idx) => {
                 let dict = self.get_dict(idx)?;
+
+                Ok(dict)
+            },
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
+        }
+    }
+
+    pub fn pop_dict_mut(&mut self) -> crate::Result<&mut DictionaryObject> {
+        match self.pop()? {
+            Object::Dictionary(idx) => {
+                let dict = self.get_dict_mut(idx)?;
 
                 Ok(dict)
             },
@@ -219,9 +292,9 @@ impl<'a> Context {
     }
 }
 
-pub fn system_dict() -> Composite {
-    type KeyOperatorPair = (&'static str, fn(&mut Context) -> crate::Result<()>);
+type KeyOperatorPair = (&'static str, fn(&mut Context) -> crate::Result<()>);
 
+fn system_operators() -> impl Iterator<Item = KeyOperatorPair> {
     let ops: Vec<KeyOperatorPair> = vec![
         ("dup", dup),
         ("exch", exch),
@@ -293,15 +366,35 @@ pub fn system_dict() -> Composite {
         ("packedarray", packedarray),
         ("setpacking", setpacking),
         ("currentpacking", currentpacking),
+        ("dict", dict),
+        ("<<", mark),
+        (">>", enddict),
+        ("maxlength", maxlength),
+        ("begin", begin),
+        ("end", end),
+        ("def", def),
+        ("load", load),
+        ("store", store),
+        ("undef", undef),
+        ("known", known),
+        ("where", wheredef),
         ("eq", eq),
+        ("true", pushtrue),
+        ("false", pushfalse),
+        ("type", gettype),
+        ("null", null),
     ];
 
-    let mut dict = HashMap::new();
-    for (key, op) in ops {
-        dict.insert(key.to_string(), Object::Operator(op));
-    }
+    ops.into_iter()
+}
 
-    let dict = DictionaryObject::new(dict, Access::ExecuteOnly, Mode::Executable);
+fn debug_operators() -> impl Iterator<Item = KeyOperatorPair> {
+    let ops: Vec<KeyOperatorPair> = vec![
+        ("assert", assert),
+        ("asserteq", asserteq),
+        ("assertne", assertne),
+        ("assertdeepeq", assertdeepeq),
+    ];
 
-    Composite::Dictionary(dict)
+    ops.into_iter()
 }

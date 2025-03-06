@@ -1,7 +1,7 @@
 use crate::{
     execute_object,
     object::{Access, Mode, NameObject},
-    ArrayObject, Context, Error, ErrorKind, Object,
+    ArrayObject, Context, Error, ErrorKind, Object, StringObject,
 };
 
 use super::usize_to_i32;
@@ -142,7 +142,7 @@ pub fn getinterval(ctx: &mut Context) -> crate::Result<()> {
     let index = ctx.pop_usize()?;
     let obj = ctx.pop()?;
 
-    let arr = match obj {
+    match obj {
         Object::Array(idx) => {
             let arr = ctx.get_array(idx)?;
 
@@ -150,30 +150,42 @@ pub fn getinterval(ctx: &mut Context) -> crate::Result<()> {
                 return Err(Error::from(ErrorKind::InvalidAccess));
             }
 
-            Ok(arr.clone())
+            if index > arr.len() {
+                return Err(Error::from(ErrorKind::RangeCheck));
+            }
+
+            let mut subarr = Vec::with_capacity(count);
+            for i in index..(index + count) {
+                let obj = arr.get(i)?;
+                subarr.push(obj.clone());
+            }
+
+            let idx =
+                ctx.mem_mut()
+                    .insert(ArrayObject::new(subarr, Access::default(), Mode::default()));
+            ctx.push(Object::Array(idx));
+
+            Ok(())
+        },
+        Object::String(idx) => {
+            let string: &str = ctx.get_string(idx)?.into();
+
+            if string.len() <= index || string.len() <= (index + count) {
+                return Err(Error::from(ErrorKind::RangeCheck));
+            }
+
+            let mut substr = String::with_capacity(count);
+            for ch in string.chars().skip(index).take(count) {
+                substr.push(ch);
+            }
+
+            let idx = ctx.mem_mut().insert(StringObject::from(substr));
+            ctx.push(Object::String(idx));
+
+            Ok(())
         },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
-    }?;
-
-    if index >= arr.len() {
-        return Err(Error::from(ErrorKind::RangeCheck));
     }
-
-    let mut subarr = Vec::with_capacity(count);
-
-    for i in index..(index + count) {
-        let obj = arr.get(i)?;
-
-        subarr.push(obj.clone());
-    }
-
-    let idx = ctx
-        .mem_mut()
-        .insert(ArrayObject::new(subarr, Access::Unlimited, Mode::Literal));
-
-    ctx.push(Object::Array(idx));
-
-    Ok(())
 }
 
 pub fn putinterval(ctx: &mut Context) -> crate::Result<()> {
@@ -241,16 +253,8 @@ pub fn aload(ctx: &mut Context) -> crate::Result<()> {
 }
 
 pub fn forall(ctx: &mut Context) -> crate::Result<()> {
-    let proc_idx = ctx.pop()?.into_index()?;
+    let proc = ctx.pop()?;
     let obj = ctx.pop()?;
-    let proc = ctx.get_array(proc_idx)?;
-
-    if !proc.access().is_executable() {
-        return Err(Error::new(
-            ErrorKind::TypeCheck,
-            "expected executable array",
-        ));
-    }
 
     match obj {
         Object::Array(idx) => {
@@ -258,7 +262,7 @@ pub fn forall(ctx: &mut Context) -> crate::Result<()> {
 
             for obj in arr.into_iter() {
                 ctx.push(obj);
-                execute_object(ctx, Object::Array(proc_idx))?;
+                execute_object(ctx, proc.clone())?;
             }
 
             Ok(())
@@ -267,12 +271,11 @@ pub fn forall(ctx: &mut Context) -> crate::Result<()> {
             let dict = ctx.get_dict(idx)?;
 
             for (key, value) in dict.clone() {
-                let key: String = key.into();
                 let name = NameObject::new(key, Mode::Literal);
                 ctx.push(Object::Name(name));
                 ctx.push(value);
 
-                execute_object(ctx, Object::Array(proc_idx))?;
+                execute_object(ctx, proc.clone())?;
             }
 
             Ok(())
