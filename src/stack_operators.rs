@@ -22,11 +22,11 @@ pub fn exch(ctx: &mut Context) -> crate::Result<()> {
 }
 
 pub fn copy(ctx: &mut Context) -> crate::Result<()> {
-    let mut original_stack = Vec::new();
-    let mut copy_stack = Vec::new();
-
     match ctx.pop()? {
         Object::Integer(n) => {
+            let mut original_stack = Vec::new();
+            let mut copy_stack = Vec::new();
+
             for _ in 0..n {
                 let obj = ctx.pop()?;
                 copy_stack.push(obj.clone());
@@ -81,6 +81,23 @@ pub fn copy(ctx: &mut Context) -> crate::Result<()> {
             }
 
             ctx.push(Object::Dictionary(idx));
+
+            Ok(())
+        },
+        Object::String(idx) => {
+            let source = ctx.pop_string()?.clone();
+            let destination = ctx.get_string_mut(idx)?;
+
+            if destination.len() < source.len() {
+                return Err(Error::from(ErrorKind::RangeCheck));
+            }
+
+            for (index, ch) in source.into_iter().enumerate() {
+                let dest_ch = destination.get_mut(index)?;
+                *dest_ch = ch;
+            }
+
+            ctx.push(Object::String(idx));
 
             Ok(())
         },

@@ -189,6 +189,16 @@ impl Context {
         Ok(string)
     }
 
+    pub fn get_string_mut(&mut self, index: usize) -> crate::Result<&mut StringObject> {
+        let string: &mut StringObject = self
+            .mem_mut()
+            .get_mut(index)
+            .ok_or(Error::from(ErrorKind::VmError))?
+            .try_into()?;
+
+        Ok(string)
+    }
+
     pub fn mem(&self) -> &Container<Composite> {
         // TODO: Switch between local and global as needed
         &self.local_mem
@@ -214,15 +224,17 @@ impl Context {
     }
 
     pub fn pop_array(&mut self) -> crate::Result<&ArrayObject> {
-        let idx = self.pop()?.into_index()?;
-
-        self.get_array(idx)
+        match self.pop()? {
+            Object::Array(idx) => self.get_array(idx),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }
     }
 
     pub fn pop_array_mut(&mut self) -> crate::Result<&mut ArrayObject> {
-        let idx = self.pop()?.into_index()?;
-
-        self.get_array_mut(idx)
+        match self.pop()? {
+            Object::Array(idx) => self.get_array_mut(idx),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
+        }
     }
 
     pub fn pop_bool(&mut self) -> crate::Result<bool> {
@@ -234,22 +246,14 @@ impl Context {
 
     pub fn pop_dict(&mut self) -> crate::Result<&DictionaryObject> {
         match self.pop()? {
-            Object::Dictionary(idx) => {
-                let dict = self.get_dict(idx)?;
-
-                Ok(dict)
-            },
+            Object::Dictionary(idx) => self.get_dict(idx),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }
 
     pub fn pop_dict_mut(&mut self) -> crate::Result<&mut DictionaryObject> {
         match self.pop()? {
-            Object::Dictionary(idx) => {
-                let dict = self.get_dict_mut(idx)?;
-
-                Ok(dict)
-            },
+            Object::Dictionary(idx) => self.get_dict_mut(idx),
             _ => Err(Error::new(ErrorKind::TypeCheck, "expected dictionary")),
         }
     }
@@ -260,6 +264,20 @@ impl Context {
 
     pub fn pop_real(&mut self) -> crate::Result<f64> {
         self.pop()?.into_real()
+    }
+
+    pub fn pop_string(&mut self) -> crate::Result<&StringObject> {
+        match self.pop()? {
+            Object::String(idx) => self.get_string(idx),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected string")),
+        }
+    }
+
+    pub fn pop_string_mut(&mut self) -> crate::Result<&mut StringObject> {
+        match self.pop()? {
+            Object::String(idx) => self.get_string_mut(idx),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected string")),
+        }
     }
 
     pub fn pop_usize(&mut self) -> crate::Result<usize> {

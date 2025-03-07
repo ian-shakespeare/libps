@@ -48,7 +48,11 @@ fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
     }
 
     match obj {
-        Object::Boolean(_) | Object::Integer(_) | Object::Real(_) | Object::String(_) => {
+        Object::Boolean(_)
+        | Object::Integer(_)
+        | Object::Real(_)
+        | Object::String(_)
+        | Object::Dictionary(_) => {
             ctx.operand_stack.push(obj);
 
             Ok(())

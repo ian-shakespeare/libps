@@ -1,0 +1,22 @@
+% test roll
+
+(a) (b) (c) 3 -1 roll
+count 3 asserteq
+/received 3 array def
+received astore
+[ (b) (c) (a) ] received assertdeepeq
+clear
+
+(a) (b) (c) 3 1 roll
+count 3 asserteq
+/received 3 array def
+received astore
+[ (c) (a) (b) ] received assertdeepeq
+clear
+
+(a) (b) (c) 3 0 roll
+count 3 asserteq
+/received 3 array def
+received astore
+[ (a) (b) (c) ] received assertdeepeq
+clear

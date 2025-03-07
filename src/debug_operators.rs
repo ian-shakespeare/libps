@@ -30,26 +30,24 @@ pub fn assertdeepeq(ctx: &mut Context) -> crate::Result<()> {
 
     match (lhs, rhs) {
         (Object::Array(lhs), Object::Array(rhs)) => {
-            let arr1 = ctx.get_array(lhs)?.clone();
-            let arr2 = ctx.get_array(rhs)?.clone();
+            let lhs = ctx.get_array(lhs)?.clone();
+            let rhs = ctx.get_array(rhs)?.clone();
 
-            for (lhs, rhs) in arr1.into_iter().zip(arr2.into_iter()) {
+            for (lhs, rhs) in lhs.into_iter().zip(rhs.into_iter()) {
                 ctx.push(lhs);
                 ctx.push(rhs);
                 assertdeepeq(ctx)?;
             }
         },
         (Object::Dictionary(lhs), Object::Dictionary(rhs)) => {
-            let dict1 = ctx.get_dict(lhs)?.clone();
-            let dict2 = ctx.get_dict(rhs)?.clone();
+            let lhs = ctx.get_dict(lhs)?.clone();
+            let rhs = ctx.get_dict(rhs)?.clone();
 
-            for ((left_key, left_obj), (right_key, right_obj)) in
-                dict1.into_iter().zip(dict2.into_iter())
-            {
-                assert_eq!(left_key, right_key);
+            for (key, lhs_obj) in lhs.into_iter() {
+                let rhs_obj = rhs.get(&key)?.clone();
 
-                ctx.push(left_obj);
-                ctx.push(right_obj);
+                ctx.push(lhs_obj);
+                ctx.push(rhs_obj);
                 assertdeepeq(ctx)?;
             }
         },
