@@ -1,0 +1,72 @@
+% test copy
+
+(a) (b) (c) 2 copy
+count 5 asserteq
+/received 5 array def
+received astore
+[ (a) (b) (c) (b) (c) ] received assertdeepeq
+clear
+
+(a) (b) (c) 0 copy
+count 3 asserteq
+/received 3 array def
+received astore
+[ (a) (b) (c) ] received assertdeepeq
+clear
+
+/source [ 1 2 3 4 5 ] def
+/target 5 array def
+source target copy
+target asserteq
+source target assertdeepeq
+clear
+
+/source <</key1 (value) /key2 (value)>> def
+/target 1 dict def
+source target copy
+target asserteq
+source target assertdeepeq
+clear
+
+/source (abcde) def
+/target (_____) def
+source target copy
+target asserteq
+source target assertdeepeq
+clear
+
+% TODO: invalidaccess check
+
+/source [ 1 2 3 ] def
+/target 1 array def
+source target copy
+/rangecheck asserterror
+handleerror clear
+
+1 [ 1 2 3 ] copy
+/typecheck asserterror
+handleerror clear
+
+1 <</key (value)>> copy
+/typecheck asserterror
+handleerror clear
+
+1 (abc) copy
+/typecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] copy
+/stackunderflow asserterror
+handleerror clear
+
+(abc) copy
+/stackunderflow asserterror
+handleerror clear
+
+<</key (value)>> copy
+/stackunderflow asserterror
+handleerror clear
+
+copy
+/stackunderflow asserterror
+handleerror clear
