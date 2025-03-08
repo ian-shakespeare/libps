@@ -184,11 +184,6 @@ pub fn currentdict(ctx: &mut Context) -> crate::Result<()> {
 }
 
 #[allow(dead_code)]
-pub fn errordict(_ctx: &mut Context) -> crate::Result<()> {
-    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
-}
-
-#[allow(dead_code)]
 pub fn errorstatus(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }

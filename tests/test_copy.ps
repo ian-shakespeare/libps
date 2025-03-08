@@ -34,3 +34,39 @@ source target copy
 target asserteq
 source target assertdeepeq
 clear
+
+% TODO: invalidaccess check
+
+/source [ 1 2 3 ] def
+/target 1 array def
+source target copy
+/rangecheck asserterror
+handleerror clear
+
+1 [ 1 2 3 ] copy
+/typecheck asserterror
+handleerror clear
+
+1 <</key (value)>> copy
+/typecheck asserterror
+handleerror clear
+
+1 (abc) copy
+/typecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] copy
+/stackunderflow asserterror
+handleerror clear
+
+(abc) copy
+/stackunderflow asserterror
+handleerror clear
+
+<</key (value)>> copy
+/stackunderflow asserterror
+handleerror clear
+
+copy
+/stackunderflow asserterror
+handleerror clear

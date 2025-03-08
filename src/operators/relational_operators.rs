@@ -28,15 +28,3 @@ pub fn eq(ctx: &mut Context) -> crate::Result<()> {
 
     Ok(())
 }
-
-pub fn pushtrue(ctx: &mut Context) -> crate::Result<()> {
-    ctx.push(Object::Boolean(true));
-
-    Ok(())
-}
-
-pub fn pushfalse(ctx: &mut Context) -> crate::Result<()> {
-    ctx.push(Object::Boolean(true));
-
-    Ok(())
-}

@@ -62,3 +62,20 @@ pub fn assertdeepeq(ctx: &mut Context) -> crate::Result<()> {
 
     Ok(())
 }
+
+pub fn asserterror(ctx: &mut Context) -> crate::Result<()> {
+    let expected = ctx.pop()?;
+
+    let idx = ctx.find_def("$error").cloned()?.into_index()?;
+    let error_info = ctx.get_dict(idx)?;
+
+    let is_new = error_info
+        .get("newerror")
+        .is_ok_and(|b| matches!(b, Object::Boolean(true)));
+    assert!(is_new, "expected error");
+
+    let received = error_info.get("errorname").cloned()?;
+    assert_eq!(expected, received);
+
+    Ok(())
+}

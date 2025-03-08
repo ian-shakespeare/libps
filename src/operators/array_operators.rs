@@ -262,7 +262,7 @@ pub fn forall(ctx: &mut Context) -> crate::Result<()> {
 
             for obj in arr.into_iter() {
                 ctx.push(obj);
-                execute_object(ctx, proc.clone())?;
+                execute_object(ctx, proc.clone());
             }
 
             Ok(())
@@ -275,7 +275,7 @@ pub fn forall(ctx: &mut Context) -> crate::Result<()> {
                 ctx.push(Object::Name(name));
                 ctx.push(value);
 
-                execute_object(ctx, proc.clone())?;
+                execute_object(ctx, proc.clone());
             }
 
             Ok(())

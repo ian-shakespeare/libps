@@ -1,17 +1,10 @@
 use std::collections::HashMap;
 
 use crate::{
-    array_operators::*,
     container::Container,
-    debug_operators::*,
-    dict_operators::*,
-    math_operators::*,
-    misc_operators::*,
     object::{Access, Composite, DictionaryObject, Mode, Object},
+    operators::*,
     rand::RandomNumberGenerator,
-    relational_operators::*,
-    stack_operators::*,
-    type_operators::*,
     ArrayObject, Error, ErrorKind, StringObject,
 };
 
@@ -29,31 +22,24 @@ impl Default for Context {
     fn default() -> Self {
         let mut local_mem: Container<Composite> = Container::default();
 
-        let system_dict = system_operators().fold(HashMap::new(), |mut dict, (key, op)| {
-            dict.insert(key.to_string(), Object::Operator(op));
-            dict
-        });
-        let system_idx = local_mem.insert(DictionaryObject::new(
-            system_dict,
-            Access::ExecuteOnly,
-            Mode::Executable,
-        ));
+        let system_dict = system_dict(&mut local_mem);
+        let system_idx = local_mem.insert(system_dict);
 
         let global_idx = local_mem.insert(DictionaryObject::new(
             HashMap::new(),
             Access::Unlimited,
-            Mode::Executable,
+            Mode::default(),
         ));
 
         let user_idx = local_mem.insert(DictionaryObject::new(
             HashMap::new(),
             Access::Unlimited,
-            Mode::Executable,
+            Mode::default(),
         ));
 
         Self {
             rng: RandomNumberGenerator::default(),
-            operand_stack: Vec::default(),
+            operand_stack: Vec::new(),
             global_mem: Container::default(),
             is_packing: false,
             dict_stack: vec![system_idx, global_idx, user_idx],
@@ -70,8 +56,8 @@ impl Context {
             .get_dict_mut(ctx.dict_stack[1])
             .expect("failed to get global dict");
 
-        for (key, op) in debug_operators() {
-            global_dict.insert(key.to_string(), Object::Operator(op));
+        for (key, op) in debug_dict().into_iter() {
+            global_dict.insert(key, op);
         }
 
         ctx
@@ -310,109 +296,207 @@ impl Context {
     }
 }
 
-type KeyOperatorPair = (&'static str, fn(&mut Context) -> crate::Result<()>);
+fn system_dict(mem: &mut Container<Composite>) -> DictionaryObject {
+    let error_dict_idx = mem.insert(error_dict());
+    let error_info_idx = mem.insert(error_info_dict());
 
-fn system_operators() -> impl Iterator<Item = KeyOperatorPair> {
-    let ops: Vec<KeyOperatorPair> = vec![
-        ("dup", dup),
-        ("exch", exch),
-        ("pop", |state| {
-            state.pop()?;
-            Ok(())
-        }),
-        ("copy", copy),
-        ("roll", roll),
-        ("index", index),
-        ("mark", mark),
-        ("clear", clear),
-        ("count", count),
-        ("counttomark", counttomark),
-        ("cleartomark", cleartomark),
-        ("add", |state| {
-            arithmetic(state, i32::checked_add, |a: f64, b: f64| a + b)
-        }),
-        ("div", |state| {
-            arithmetic(state, |_, _| None, |a: f64, b: f64| a / b)
-        }),
-        ("idiv", idiv),
-        ("imod", imod),
-        ("mul", |state| {
-            arithmetic(state, i32::checked_mul, |a: f64, b: f64| a * b)
-        }),
-        ("sub", |state| {
-            arithmetic(state, i32::checked_sub, |a: f64, b: f64| a - b)
-        }),
-        ("abs", |state| num_unary(state, i32::checked_abs, f64::abs)),
-        ("neg", |state| {
-            num_unary(state, i32::checked_neg, |a: f64| -1.0 * a)
-        }),
-        ("ceiling", |state| {
-            num_unary(state, |a: i32| Some(a), f64::ceil)
-        }),
-        ("floor", |state| {
-            num_unary(state, |a: i32| Some(a), f64::floor)
-        }),
-        ("round", |state| {
-            num_unary(state, |a: i32| Some(a), f64::round)
-        }),
-        ("truncate", |state| {
-            num_unary(state, |a: i32| Some(a), f64::trunc)
-        }),
-        ("sqrt", |state| real_unary(state, f64::sqrt)),
-        ("atan", atan),
-        ("cos", cos),
-        ("sin", sin),
-        ("exp", |state| {
-            arithmetic(state, |_, _| None, |base: f64, exp: f64| base.powf(exp))
-        }),
-        ("ln", |state| real_unary(state, f64::ln)),
-        ("log", |state| real_unary(state, f64::log10)),
-        ("rand", rand),
-        ("srand", srand),
-        ("rrand", rrand),
-        ("array", array),
-        ("[", mark),
-        ("]", endarray),
-        ("length", length),
-        ("get", get),
-        ("put", put),
-        ("getinterval", getinterval),
-        ("putinterval", putinterval),
-        ("astore", astore),
-        ("aload", aload),
-        ("forall", forall),
-        ("packedarray", packedarray),
-        ("setpacking", setpacking),
-        ("currentpacking", currentpacking),
-        ("dict", dict),
-        ("<<", mark),
-        (">>", enddict),
-        ("maxlength", maxlength),
-        ("begin", begin),
-        ("end", end),
-        ("def", def),
-        ("load", load),
-        ("store", store),
-        ("undef", undef),
-        ("known", known),
-        ("where", wheredef),
-        ("eq", eq),
-        ("true", pushtrue),
-        ("false", pushfalse),
-        ("type", gettype),
-        ("null", null),
+    let definitions = [
+        ("dup", Object::Operator(dup)),
+        ("exch", Object::Operator(exch)),
+        (
+            "pop",
+            Object::Operator(|state| {
+                state.pop()?;
+                Ok(())
+            }),
+        ),
+        ("copy", Object::Operator(copy)),
+        ("roll", Object::Operator(roll)),
+        ("index", Object::Operator(index)),
+        ("mark", Object::Operator(mark)),
+        ("clear", Object::Operator(clear)),
+        ("count", Object::Operator(count)),
+        ("counttomark", Object::Operator(counttomark)),
+        ("cleartomark", Object::Operator(cleartomark)),
+        (
+            "add",
+            Object::Operator(|state| arithmetic(state, i32::checked_add, |a: f64, b: f64| a + b)),
+        ),
+        (
+            "div",
+            Object::Operator(|state| arithmetic(state, |_, _| None, |a: f64, b: f64| a / b)),
+        ),
+        ("idiv", Object::Operator(idiv)),
+        ("imod", Object::Operator(imod)),
+        (
+            "mul",
+            Object::Operator(|state| arithmetic(state, i32::checked_mul, |a: f64, b: f64| a * b)),
+        ),
+        (
+            "sub",
+            Object::Operator(|state| arithmetic(state, i32::checked_sub, |a: f64, b: f64| a - b)),
+        ),
+        (
+            "abs",
+            Object::Operator(|state| num_unary(state, i32::checked_abs, f64::abs)),
+        ),
+        (
+            "neg",
+            Object::Operator(|state| num_unary(state, i32::checked_neg, |a: f64| -1.0 * a)),
+        ),
+        (
+            "ceiling",
+            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::ceil)),
+        ),
+        (
+            "floor",
+            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::floor)),
+        ),
+        (
+            "round",
+            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::round)),
+        ),
+        (
+            "truncate",
+            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::trunc)),
+        ),
+        (
+            "sqrt",
+            Object::Operator(|state| real_unary(state, f64::sqrt)),
+        ),
+        ("atan", Object::Operator(atan)),
+        ("cos", Object::Operator(cos)),
+        ("sin", Object::Operator(sin)),
+        (
+            "exp",
+            Object::Operator(|state| {
+                arithmetic(state, |_, _| None, |base: f64, exp: f64| base.powf(exp))
+            }),
+        ),
+        ("ln", Object::Operator(|state| real_unary(state, f64::ln))),
+        (
+            "log",
+            Object::Operator(|state| real_unary(state, f64::log10)),
+        ),
+        ("rand", Object::Operator(rand)),
+        ("srand", Object::Operator(srand)),
+        ("rrand", Object::Operator(rrand)),
+        ("array", Object::Operator(array)),
+        ("[", Object::Operator(mark)),
+        ("]", Object::Operator(endarray)),
+        ("length", Object::Operator(length)),
+        ("get", Object::Operator(get)),
+        ("put", Object::Operator(put)),
+        ("getinterval", Object::Operator(getinterval)),
+        ("putinterval", Object::Operator(putinterval)),
+        ("astore", Object::Operator(astore)),
+        ("aload", Object::Operator(aload)),
+        ("forall", Object::Operator(forall)),
+        ("packedarray", Object::Operator(packedarray)),
+        ("setpacking", Object::Operator(setpacking)),
+        ("currentpacking", Object::Operator(currentpacking)),
+        ("dict", Object::Operator(dict)),
+        ("<<", Object::Operator(mark)),
+        (">>", Object::Operator(enddict)),
+        ("maxlength", Object::Operator(maxlength)),
+        ("begin", Object::Operator(begin)),
+        ("end", Object::Operator(end)),
+        ("def", Object::Operator(def)),
+        ("load", Object::Operator(load)),
+        ("store", Object::Operator(store)),
+        ("undef", Object::Operator(undef)),
+        ("known", Object::Operator(known)),
+        ("where", Object::Operator(wheredef)),
+        ("currentdict", Object::Operator(currentdict)),
+        ("errordict", Object::Dictionary(error_dict_idx)),
+        ("$error", Object::Dictionary(error_info_idx)),
+        ("eq", Object::Operator(eq)),
+        ("true", Object::Boolean(true)),
+        ("false", Object::Boolean(false)),
+        ("type", Object::Operator(gettype)),
+        ("null", Object::Operator(null)),
+        ("handleerror", Object::Operator(handleerror)),
     ];
 
-    ops.into_iter()
+    definitions.into_iter().fold(
+        DictionaryObject::new(HashMap::new(), Access::ExecuteOnly, Mode::default()),
+        |mut dict, (key, obj)| {
+            dict.insert(key, obj);
+            dict
+        },
+    )
 }
 
-fn debug_operators() -> impl Iterator<Item = KeyOperatorPair> {
-    let ops: Vec<KeyOperatorPair> = vec![
-        ("assert", assert),
-        ("asserteq", asserteq),
-        ("assertne", assertne),
-        ("assertdeepeq", assertdeepeq),
+fn error_dict() -> DictionaryObject {
+    let definitions = [
+        (
+            ErrorKind::DictStackUnderflow,
+            Object::Operator(dictstackunderflow),
+        ),
+        (ErrorKind::InvalidAccess, Object::Operator(invalidaccess)),
+        (ErrorKind::IoError, Object::Operator(ioerror)),
+        (ErrorKind::LimitCheck, Object::Operator(limitcheck)),
+        (ErrorKind::RangeCheck, Object::Operator(rangecheck)),
+        (ErrorKind::StackUnderflow, Object::Operator(stackunderflow)),
+        (ErrorKind::SyntaxError, Object::Operator(syntaxerror)),
+        (ErrorKind::TypeCheck, Object::Operator(typecheck)),
+        (ErrorKind::Undefined, Object::Operator(undefined)),
+        (
+            ErrorKind::UndefinedResult,
+            Object::Operator(undefinedresult),
+        ),
+        (ErrorKind::UnmatchedMark, Object::Operator(unmatchedmark)),
+        (ErrorKind::Unregistered, Object::Operator(unregistered)),
+        (ErrorKind::VmError, Object::Operator(vmerror)),
     ];
 
-    ops.into_iter()
+    definitions.into_iter().fold(
+        DictionaryObject::new(HashMap::new(), Access::Unlimited, Mode::default()),
+        |mut dict, (key, obj)| {
+            let key: &str = key.into();
+            dict.insert(key, obj);
+            dict
+        },
+    )
+}
+
+fn error_info_dict() -> DictionaryObject {
+    let definitions = [
+        ("newerror", Object::Boolean(false)),
+        ("errorname", Object::Null),
+        ("command", Object::Null),
+        ("errorinfo", Object::Null),
+        ("ostack", Object::Null),
+        ("estack", Object::Null),
+        ("dstack", Object::Null),
+        // TODO: actually record all stacks and set this to true
+        ("recordstacks", Object::Boolean(false)),
+        ("binary", Object::Boolean(false)),
+    ];
+
+    definitions.into_iter().fold(
+        DictionaryObject::new(HashMap::new(), Access::Unlimited, Mode::default()),
+        |mut dict, (key, obj)| {
+            dict.insert(key, obj);
+            dict
+        },
+    )
+}
+
+fn debug_dict() -> DictionaryObject {
+    let definitions = [
+        ("assert", Object::Operator(assert)),
+        ("asserteq", Object::Operator(asserteq)),
+        ("assertne", Object::Operator(assertne)),
+        ("assertdeepeq", Object::Operator(assertdeepeq)),
+        ("asserterror", Object::Operator(asserterror)),
+    ];
+
+    definitions.into_iter().fold(
+        DictionaryObject::new(HashMap::new(), Access::Unlimited, Mode::default()),
+        |mut dict, (key, obj)| {
+            dict.insert(key, obj);
+            dict
+        },
+    )
 }

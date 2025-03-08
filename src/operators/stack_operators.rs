@@ -110,7 +110,12 @@ pub fn roll(ctx: &mut Context) -> crate::Result<()> {
     let mut bottom_stack = Vec::new();
 
     let j = ctx.pop_int()?;
-    let n = ctx.pop_int()?;
+    let n = ctx.pop_usize()?;
+
+    if n > ctx.operand_stack.len() {
+        return Err(Error::from(ErrorKind::RangeCheck));
+    }
+    let n = usize_to_i32(n)?;
 
     let j = (n + j) % n;
     for i in 0..n {

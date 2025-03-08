@@ -1,4 +1,4 @@
-use std::{f64::consts, io};
+use std::io;
 
 pub use context::Context;
 pub use error::{Error, ErrorKind};
@@ -6,21 +6,14 @@ use lexer::Lexer;
 use object::{Access, DictionaryObject, Mode};
 pub use object::{ArrayObject, Object, StringObject};
 
-mod array_operators;
 mod container;
 mod context;
-mod debug_operators;
-mod dict_operators;
 mod encoding;
 mod error;
 mod lexer;
-mod math_operators;
-mod misc_operators;
 mod object;
+mod operators;
 mod rand;
-mod relational_operators;
-mod stack_operators;
-mod type_operators;
 
 pub type Result<T> = std::result::Result<T, crate::Error>;
 
@@ -35,16 +28,26 @@ pub fn evaluate(ctx: &mut Context, input: &str) -> crate::Result<()> {
             continue;
         }
 
-        execute_object(ctx, obj)?;
+        execute_object(ctx, obj);
     }
 
     Ok(())
 }
 
-fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
-    if obj.mode(ctx)? == Mode::Literal {
+fn execute_object(ctx: &mut Context, obj: Object) {
+    let snapshot = ctx.operand_stack.clone();
+
+    let mode = match obj.mode(ctx) {
+        Ok(mode) => mode,
+        Err(e) => {
+            handle_error(ctx, e, obj, snapshot).expect("failed to handle error");
+            return;
+        },
+    };
+
+    if mode == Mode::Literal {
         ctx.operand_stack.push(obj);
-        return Ok(());
+        return;
     }
 
     match obj {
@@ -54,26 +57,70 @@ fn execute_object(ctx: &mut Context, obj: Object) -> crate::Result<()> {
         | Object::String(_)
         | Object::Dictionary(_) => {
             ctx.operand_stack.push(obj);
-
-            Ok(())
         },
         Object::Array(idx) => {
-            let array = ctx.get_array(idx)?.clone();
+            let array = match ctx.get_array(idx).cloned() {
+                Ok(array) => array,
+                Err(e) => {
+                    handle_error(ctx, e, obj, snapshot).expect("failed to handle error");
+                    return;
+                },
+            };
 
             if !array.access().is_executable() {
-                return Err(Error::from(ErrorKind::InvalidAccess));
+                handle_error(ctx, Error::from(ErrorKind::InvalidAccess), obj, snapshot)
+                    .expect("failed to handle error");
+                return;
             }
 
             for obj in array.into_iter() {
-                execute_object(ctx, obj)?;
+                execute_object(ctx, obj);
             }
-
-            Ok(())
         },
-        Object::Name(name) => execute_object(ctx, ctx.find_def(name)?.clone()),
-        Object::Operator(operator) => operator(ctx),
-        _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
+        Object::Name(ref name) => {
+            let obj = match ctx.find_def(name).cloned() {
+                Ok(obj) => obj,
+                Err(e) => {
+                    handle_error(ctx, e, obj, snapshot).expect("failed to handle error");
+                    return;
+                },
+            };
+            execute_object(ctx, obj);
+        },
+        Object::Operator(operator) => {
+            if let Err(e) = operator(ctx) {
+                handle_error(ctx, e, obj, snapshot).expect("failed to handle error");
+            }
+        },
+        _ => {
+            handle_error(
+                ctx,
+                Error::new(ErrorKind::Unregistered, "not implemented"),
+                obj,
+                snapshot,
+            )
+            .expect("failed to handle error");
+        },
     }
+}
+
+pub fn handle_error(
+    ctx: &mut Context,
+    e: Error,
+    cause: Object,
+    stack_snapshot: Vec<Object>,
+) -> crate::Result<()> {
+    // Recover the operand stack
+    ctx.operand_stack = stack_snapshot;
+    ctx.push(cause);
+
+    // Execute error handler
+    let idx = ctx.find_def("errordict").cloned()?.into_index()?;
+    let error_dict = ctx.get_dict(idx)?;
+    let handler = error_dict.get(e.kind().into()).cloned()?;
+    execute_object(ctx, handler);
+
+    Ok(())
 }
 
 pub fn write_stack(writer: &mut impl io::Write, ctx: &Context) -> io::Result<usize> {
@@ -168,36 +215,4 @@ fn write_object(writer: &mut impl io::Write, ctx: &Context, obj: &Object) -> io:
         Object::Null => writer.write(b"null"),
         _ => Ok(0),
     }
-}
-
-fn radians_to_degrees(radians: f64) -> f64 {
-    radians * (180.0 / consts::PI)
-}
-
-fn degrees_to_radians(degrees: f64) -> f64 {
-    (degrees * consts::PI) / 180.0
-}
-
-fn positive_degrees(degrees: f64) -> f64 {
-    if degrees < 0.0 {
-        360.0 + degrees
-    } else {
-        degrees
-    }
-}
-
-fn usize_to_i32(u: usize) -> crate::Result<i32> {
-    let i: i32 = match u.try_into() {
-        Ok(i) => Ok(i),
-        Err(_) => Err(Error::new(
-            ErrorKind::Unregistered,
-            "failed to convert usize to int",
-        )),
-    }?;
-
-    Ok(i)
-}
-
-fn is_valid_real(n: f64) -> bool {
-    n.is_finite() && !n.is_nan()
 }

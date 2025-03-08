@@ -361,8 +361,11 @@ impl DictionaryObject {
             .ok_or(Error::new(ErrorKind::Undefined, key))
     }
 
-    pub fn insert(&mut self, key: String, obj: Object) -> Option<Object> {
-        self.inner.insert(key, obj)
+    pub fn insert<S>(&mut self, key: S, obj: Object) -> Option<Object>
+    where
+        S: Into<String>,
+    {
+        self.inner.insert(key.into(), obj)
     }
 
     pub fn len(&self) -> usize {
