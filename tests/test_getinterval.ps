@@ -1,15 +1,45 @@
 % test getinterval
 
-/nums [ 1 2 3 4 5 ] def
-nums 1 3 getinterval
+[ 1 2 3 4 5 ] 1 3 getinterval
 [ 2 3 4 ] assertdeepeq
 
-nums 0 0 getinterval
+[ 1 2 3 4 5 ] 0 0 getinterval
 [] assertdeepeq
 
-/str (abcde) def
-str 1 3 getinterval
+(abcde) 1 3 getinterval
 (bcd) assertdeepeq
 
-str 0 0 getinterval
+(abcde) 0 0 getinterval
 () assertdeepeq
+
+[ 1 2 3 4 5 ] -1 3 getinterval
+/rangecheck asserterror
+handleerror clear
+
+[ 1 2 3 4 5 ] 3 3 getinterval
+/rangecheck asserterror
+handleerror clear
+
+3.14 0 0 getinterval
+/typecheck asserterror
+handleerror clear
+
+() (a) 0 getinterval
+/typecheck asserterror
+handleerror clear
+
+() 0 (a) getinterval
+/typecheck asserterror
+handleerror clear
+
+0 0 getinterval
+/stackunderflow asserterror
+handleerror clear
+
+0 getinterval
+/stackunderflow asserterror
+handleerror clear
+
+getinterval
+/stackunderflow asserterror
+handleerror clear

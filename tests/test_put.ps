@@ -3,3 +3,49 @@
 /received 5 array def
 received 2 (value) put
 [ null null (value) null null ] received assertdeepeq
+
+/received 1 dict def
+received (key) (value) put
+<</key (value)>> received assertdeepeq
+
+/received (abc) def
+received 1 100  put
+(adc) received assertdeepeq
+
+% TODO: test for invalid access
+
+[1 2 3] -1 (a) put
+/rangecheck asserterror
+handleerror clear
+
+[1 2 3] 3 (a) put
+/rangecheck asserterror
+handleerror clear
+
+(abc) -1 (a) put
+/rangecheck asserterror
+handleerror clear
+
+(abc) 3 (a) put
+/rangecheck asserterror
+handleerror clear
+
+3.14 0 (a) put
+/typecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] (a) (a) put
+/typecheck asserterror
+handleerror clear
+
+0 (a) put
+/stackunderflow asserterror
+handleerror clear
+
+(a) put
+/stackunderflow asserterror
+handleerror clear
+
+put
+/stackunderflow asserterror
+handleerror clear

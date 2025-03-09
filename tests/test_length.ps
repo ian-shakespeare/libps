@@ -1,4 +1,27 @@
 % test length
 
-5 array length
-5 asserteq
+[ 1 2 3 ] length
+3 asserteq
+clear
+
+<</key1 (value) /key2 (value)>> length
+2 asserteq
+clear
+
+(abc) length
+3 asserteq
+clear
+
+/abc length
+3 asserteq
+clear
+
+% TODO: test invalid access
+
+1 length
+/typecheck asserterror
+handleerror clear
+
+length
+/stackunderflow asserterror
+handleerror clear

@@ -46,7 +46,7 @@ pub fn length(ctx: &mut Context) -> crate::Result<()> {
     let obj = ctx.pop()?;
 
     let len = match obj {
-        Object::Array(idx) | Object::Dictionary(idx) => {
+        Object::Array(idx) => {
             let arr = ctx.get_array(idx)?;
 
             if !arr.access().is_readable() {
@@ -55,6 +55,21 @@ pub fn length(ctx: &mut Context) -> crate::Result<()> {
 
             Ok(arr.len())
         },
+        Object::Dictionary(idx) => {
+            let dict = ctx.get_dict(idx)?;
+
+            if !dict.access().is_readable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            Ok(dict.len())
+        },
+        Object::String(idx) => {
+            let string = ctx.get_string(idx)?;
+
+            Ok(string.len())
+        },
+        Object::Name(name) => Ok(name.len()),
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
 
@@ -93,6 +108,14 @@ pub fn get(ctx: &mut Context) -> crate::Result<()> {
 
             Ok(obj.clone())
         },
+        Object::String(idx) => {
+            let string = ctx.get_string(idx)?;
+
+            let index = key.into_usize()?;
+            let ch_code: i32 = string.get(index).cloned()?.into();
+
+            Ok(Object::Integer(ch_code))
+        },
         _ => Err(Error::new(ErrorKind::TypeCheck, "expected array")),
     }?;
 
@@ -130,6 +153,19 @@ pub fn put(ctx: &mut Context) -> crate::Result<()> {
             }
 
             dict.insert(key, value);
+
+            Ok(())
+        },
+        Object::String(idx) => {
+            let string = ctx.get_string_mut(idx)?;
+
+            let index = key.into_usize()?;
+            let ch = string.get_mut(index)?;
+
+            *ch = value
+                .into_int()?
+                .try_into()
+                .or(Err(Error::from(ErrorKind::RangeCheck)))?;
 
             Ok(())
         },

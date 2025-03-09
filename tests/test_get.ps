@@ -2,3 +2,39 @@
 
 [ 1 2 3 4 5 ] 2 get
 3 asserteq
+clear
+
+<</key (value)>> (key) get
+(value) assertdeepeq
+clear
+
+/c_ascii_code 99 def
+(abcde) 2 get
+c_ascii_code asserteq
+clear
+
+% TODO: test for invalid access
+
+[ 1 2 3 ] -1 get
+/rangecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] 3 get
+/rangecheck asserterror
+handleerror clear
+
+3.14 0 get
+/typecheck asserterror
+handleerror clear
+
+<</somekey (value)>> (someotherkey) get
+/undefined asserterror
+handleerror clear
+
+0 get
+/stackunderflow asserterror
+handleerror clear
+
+get
+/stackunderflow asserterror
+handleerror clear
