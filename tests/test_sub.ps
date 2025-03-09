@@ -1,41 +1,31 @@
-% test idiv
+% test sub
 
-<</integertype true>> begin
-
-3 2 idiv
-dup
-type assert
-1 asserteq
+5 2 sub
+3 asserteq
 clear
 
-4 2 idiv
-dup
-type assert
-2 asserteq
+5.5 2.5 sub
+3.0 asserteq
 clear
 
--5 2 idiv
-dup
-type assert
--2 asserteq
-clear
-
-1 0 idiv
+/floatmin -1.7e308 def
+/floatmax 1.7e308 def
+floatmin floatmax sub
 /undefinedresult asserterror
 handleerror clear
 
-(abc) 2 idiv
+(abc) 2 sub
 /typecheck asserterror
 handleerror clear
 
-1 (abc) idiv
+5 (abc) sub
 /typecheck asserterror
 handleerror clear
 
-2 idiv
+2 sub
 /stackunderflow asserterror
 handleerror clear
 
-idiv
+sub
 /stackunderflow asserterror
 handleerror clear

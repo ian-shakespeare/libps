@@ -1,0 +1,21 @@
+% test ceiling
+
+3.2 ceiling
+4.0 asserteq
+clear
+
+-4.8 ceiling
+-4.0 asserteq
+clear
+
+99 ceiling
+99 asserteq
+clear
+
+(abc) ceiling
+/typecheck asserterror
+handleerror clear
+
+ceiling
+/stackunderflow asserterror
+handleerror clear

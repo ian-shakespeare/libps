@@ -65,20 +65,6 @@ pub fn num_unary(
     Ok(())
 }
 
-pub fn real_unary(ctx: &mut Context, unary: impl Fn(f64) -> f64) -> crate::Result<()> {
-    let n = ctx.pop_real()?;
-
-    let total = unary(n);
-
-    if !is_valid_real(total) {
-        return Err(Error::from(ErrorKind::UndefinedResult));
-    }
-
-    ctx.push(Object::Real(total));
-
-    Ok(())
-}
-
 pub fn idiv(ctx: &mut Context) -> crate::Result<()> {
     let rhs = ctx.pop_int()?;
     let lhs = ctx.pop_int()?;
@@ -103,6 +89,54 @@ pub fn imod(ctx: &mut Context) -> crate::Result<()> {
     }?;
 
     ctx.push(Object::Integer(total));
+
+    Ok(())
+}
+
+pub fn round(ctx: &mut Context) -> crate::Result<()> {
+    let num = ctx.pop()?;
+
+    if num.is_int() {
+        ctx.push(num);
+        return Ok(());
+    }
+
+    let num = num.into_real()?;
+
+    let total = if num < 0.0 {
+        if num.fract() < -0.5 {
+            num.floor()
+        } else {
+            num.ceil()
+        }
+    } else if num.fract() >= 0.5 {
+        num.ceil()
+    } else {
+        num.floor()
+    };
+
+    if !is_valid_real(total) {
+        return Err(Error::from(ErrorKind::UndefinedResult));
+    }
+
+    ctx.push(Object::Real(total));
+
+    Ok(())
+}
+
+pub fn sqrt(ctx: &mut Context) -> crate::Result<()> {
+    let num = ctx.pop_real()?;
+
+    if num < 0.0 {
+        return Err(Error::from(ErrorKind::RangeCheck));
+    }
+
+    let total = num.sqrt();
+    if !is_valid_real(total) {
+        return Err(Error::from(ErrorKind::UndefinedResult));
+    }
+
+    ctx.push(Object::Real(total));
 
     Ok(())
 }
@@ -145,6 +179,32 @@ pub fn sin(ctx: &mut Context) -> crate::Result<()> {
         return Err(Error::from(ErrorKind::UndefinedResult));
     }
 
+    ctx.push(Object::Real(total));
+
+    Ok(())
+}
+
+pub fn ln(ctx: &mut Context) -> crate::Result<()> {
+    let n = ctx.pop_real()?;
+
+    if n < 0.0 {
+        return Err(Error::from(ErrorKind::RangeCheck));
+    }
+
+    let total = n.ln();
+    ctx.push(Object::Real(total));
+
+    Ok(())
+}
+
+pub fn log(ctx: &mut Context) -> crate::Result<()> {
+    let n = ctx.pop_real()?;
+
+    if n < 0.0 {
+        return Err(Error::from(ErrorKind::RangeCheck));
+    }
+
+    let total = n.log10();
     ctx.push(Object::Real(total));
 
     Ok(())

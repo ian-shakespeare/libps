@@ -2,6 +2,29 @@
 
 3 4 add
 7 asserteq
+clear
 
 9.9 1.1 add
 11 asserteq
+clear
+
+/floatmax 1.7e308 def
+floatmax dup add
+/undefinedresult asserterror
+handleerror clear
+
+(abc) 1 add
+/typecheck asserterror
+handleerror clear
+
+1 (abc) add
+/typecheck asserterror
+handleerror clear
+
+1 add
+/stackunderflow asserterror
+handleerror clear
+
+add
+/stackunderflow asserterror
+handleerror clear

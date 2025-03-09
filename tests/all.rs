@@ -83,6 +83,91 @@ fn test_idiv() -> TestResult {
 }
 
 #[test]
+fn test_mod() -> TestResult {
+    run_test("test_mod.ps")
+}
+
+#[test]
+fn test_sub() -> TestResult {
+    run_test("test_sub.ps")
+}
+
+#[test]
+fn test_abs() -> TestResult {
+    run_test("test_abs.ps")
+}
+
+#[test]
+fn test_neg() -> TestResult {
+    run_test("test_neg.ps")
+}
+
+#[test]
+fn test_ceiling() -> TestResult {
+    run_test("test_ceiling.ps")
+}
+
+#[test]
+fn test_floor() -> TestResult {
+    run_test("test_floor.ps")
+}
+
+#[test]
+fn test_round() -> TestResult {
+    run_test("test_round.ps")
+}
+
+#[test]
+fn test_truncate() -> TestResult {
+    run_test("test_truncate.ps")
+}
+
+#[test]
+fn test_sqrt() -> TestResult {
+    run_test("test_sqrt.ps")
+}
+
+#[test]
+fn test_atan() -> TestResult {
+    run_test("test_atan.ps")
+}
+
+#[test]
+fn test_cos() -> TestResult {
+    run_test("test_cos.ps")
+}
+
+#[test]
+fn test_sin() -> TestResult {
+    run_test("test_sin.ps")
+}
+
+#[test]
+fn test_exp() -> TestResult {
+    run_test("test_exp.ps")
+}
+
+#[test]
+fn test_ln() -> TestResult {
+    run_test("test_ln.ps")
+}
+
+#[test]
+fn test_log() -> TestResult {
+    run_test("test_log.ps")
+}
+
+#[test]
+fn test_rand() -> TestResult {
+    run_test("test_rand.ps")
+}
+
+#[test]
+fn test_srand() -> TestResult {
+    run_test("test_srand.ps")
+}
+
+#[test]
 fn test_array() -> TestResult {
     run_test("test_array.ps")
 }

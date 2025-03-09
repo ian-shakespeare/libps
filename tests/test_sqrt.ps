@@ -1,0 +1,25 @@
+% test sqrt
+
+4 sqrt
+2.0 asserteq
+clear
+
+9 sqrt
+3.0 asserteq
+clear
+
+30.25 sqrt
+5.5 asserteq
+clear
+
+-4 sqrt
+/rangecheck asserterror
+handleerror clear
+
+(abc) sqrt
+/typecheck asserterror
+handleerror clear
+
+sqrt
+/stackunderflow asserterror
+handleerror clear

@@ -1,0 +1,17 @@
+% test neg
+
+4.5 neg
+-4.5 asserteq
+clear
+
+-3 neg
+3 asserteq
+clear
+
+(abc) neg
+/typecheck asserterror
+handleerror clear
+
+neg
+/stackunderflow asserterror
+handleerror clear

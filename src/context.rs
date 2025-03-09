@@ -305,8 +305,8 @@ fn system_dict(mem: &mut Container<Composite>) -> DictionaryObject {
         ("exch", Object::Operator(exch)),
         (
             "pop",
-            Object::Operator(|state| {
-                state.pop()?;
+            Object::Operator(|ctx| {
+                ctx.pop()?;
                 Ok(())
             }),
         ),
@@ -320,64 +320,55 @@ fn system_dict(mem: &mut Container<Composite>) -> DictionaryObject {
         ("cleartomark", Object::Operator(cleartomark)),
         (
             "add",
-            Object::Operator(|state| arithmetic(state, i32::checked_add, |a: f64, b: f64| a + b)),
+            Object::Operator(|ctx| arithmetic(ctx, i32::checked_add, |a: f64, b: f64| a + b)),
         ),
         (
             "div",
-            Object::Operator(|state| arithmetic(state, |_, _| None, |a: f64, b: f64| a / b)),
+            Object::Operator(|ctx| arithmetic(ctx, |_, _| None, |a: f64, b: f64| a / b)),
         ),
         ("idiv", Object::Operator(idiv)),
-        ("imod", Object::Operator(imod)),
+        ("mod", Object::Operator(imod)),
         (
             "mul",
-            Object::Operator(|state| arithmetic(state, i32::checked_mul, |a: f64, b: f64| a * b)),
+            Object::Operator(|ctx| arithmetic(ctx, i32::checked_mul, |a: f64, b: f64| a * b)),
         ),
         (
             "sub",
-            Object::Operator(|state| arithmetic(state, i32::checked_sub, |a: f64, b: f64| a - b)),
+            Object::Operator(|ctx| arithmetic(ctx, i32::checked_sub, |a: f64, b: f64| a - b)),
         ),
         (
             "abs",
-            Object::Operator(|state| num_unary(state, i32::checked_abs, f64::abs)),
+            Object::Operator(|ctx| num_unary(ctx, i32::checked_abs, f64::abs)),
         ),
         (
             "neg",
-            Object::Operator(|state| num_unary(state, i32::checked_neg, |a: f64| -1.0 * a)),
+            Object::Operator(|ctx| num_unary(ctx, i32::checked_neg, |a: f64| -1.0 * a)),
         ),
         (
             "ceiling",
-            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::ceil)),
+            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::ceil)),
         ),
         (
             "floor",
-            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::floor)),
+            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::floor)),
         ),
-        (
-            "round",
-            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::round)),
-        ),
+        ("round", Object::Operator(round)),
         (
             "truncate",
-            Object::Operator(|state| num_unary(state, |a: i32| Some(a), f64::trunc)),
+            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::trunc)),
         ),
-        (
-            "sqrt",
-            Object::Operator(|state| real_unary(state, f64::sqrt)),
-        ),
+        ("sqrt", Object::Operator(sqrt)),
         ("atan", Object::Operator(atan)),
         ("cos", Object::Operator(cos)),
         ("sin", Object::Operator(sin)),
         (
             "exp",
-            Object::Operator(|state| {
-                arithmetic(state, |_, _| None, |base: f64, exp: f64| base.powf(exp))
+            Object::Operator(|ctx| {
+                arithmetic(ctx, |_, _| None, |base: f64, exp: f64| base.powf(exp))
             }),
         ),
-        ("ln", Object::Operator(|state| real_unary(state, f64::ln))),
-        (
-            "log",
-            Object::Operator(|state| real_unary(state, f64::log10)),
-        ),
+        ("ln", Object::Operator(ln)),
+        ("log", Object::Operator(log)),
         ("rand", Object::Operator(rand)),
         ("srand", Object::Operator(srand)),
         ("rrand", Object::Operator(rrand)),
@@ -490,6 +481,7 @@ fn debug_dict() -> DictionaryObject {
         ("assertne", Object::Operator(assertne)),
         ("assertdeepeq", Object::Operator(assertdeepeq)),
         ("asserterror", Object::Operator(asserterror)),
+        ("assertnear", Object::Operator(assertnear)),
     ];
 
     definitions.into_iter().fold(

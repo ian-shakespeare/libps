@@ -1,41 +1,31 @@
-% test idiv
+% test exp
 
-<</integertype true>> begin
+/errormargin 0.000001 def
 
-3 2 idiv
-dup
-type assert
-1 asserteq
+9 0.5 exp
+3 asserteq
 clear
 
-4 2 idiv
-dup
-type assert
-2 asserteq
+-9 -1 exp
+-0.111111 errormargin assertnear
 clear
 
--5 2 idiv
-dup
-type assert
--2 asserteq
-clear
-
-1 0 idiv
+-9 0.5 exp
 /undefinedresult asserterror
 handleerror clear
 
-(abc) 2 idiv
+(abc) 2 exp
 /typecheck asserterror
 handleerror clear
 
-1 (abc) idiv
+1 (abc) exp
 /typecheck asserterror
 handleerror clear
 
-2 idiv
+2 exp
 /stackunderflow asserterror
 handleerror clear
 
-idiv
+exp
 /stackunderflow asserterror
 handleerror clear

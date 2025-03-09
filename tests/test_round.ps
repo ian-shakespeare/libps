@@ -1,0 +1,33 @@
+% test round
+
+3.2 round
+3.0 asserteq
+clear
+
+6.5 round
+7.0 asserteq
+clear
+
+-4.8 round
+-5.0 asserteq
+clear
+
+-6.5 round
+-6.0 asserteq
+clear
+
+<</integertype true>> begin
+
+99 round
+dup
+type assert
+99 asserteq
+clear
+
+(abc) round
+/typecheck asserterror
+handleerror clear
+
+round
+/stackunderflow asserterror
+handleerror clear

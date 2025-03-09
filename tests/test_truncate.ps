@@ -1,0 +1,25 @@
+% test truncate
+
+3.2 truncate
+3.0 asserteq
+clear
+
+-4.8 truncate
+-4.0 asserteq
+clear
+
+<</integertype true>> begin
+
+99 truncate
+dup
+type assert
+99 asserteq
+clear
+
+(abc) truncate
+/typecheck asserterror
+handleerror clear
+
+truncate
+/stackunderflow asserterror
+handleerror clear

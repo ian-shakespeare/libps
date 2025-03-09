@@ -1,0 +1,19 @@
+% test cos
+
+/errormargin 0.000001 def
+
+0 cos
+1.0 errormargin assertnear
+clear
+
+90 cos
+0.0 errormargin assertnear
+clear
+
+(abc) cos
+/typecheck asserterror
+handleerror clear
+
+cos
+/stackunderflow asserterror
+handleerror clear

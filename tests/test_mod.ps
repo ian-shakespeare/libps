@@ -1,41 +1,41 @@
-% test idiv
+% test mod
 
 <</integertype true>> begin
 
-3 2 idiv
-dup
-type assert
-1 asserteq
-clear
-
-4 2 idiv
+5 3 mod
 dup
 type assert
 2 asserteq
 clear
 
--5 2 idiv
+5 2 mod
+dup
+type assert
+1 asserteq
+clear
+
+-5 3 mod
 dup
 type assert
 -2 asserteq
 clear
 
-1 0 idiv
+5 0 mod
 /undefinedresult asserterror
 handleerror clear
 
-(abc) 2 idiv
+5.5 2 mod
 /typecheck asserterror
 handleerror clear
 
-1 (abc) idiv
+5 2.5 mod
 /typecheck asserterror
 handleerror clear
 
-2 idiv
+2 mod
 /stackunderflow asserterror
 handleerror clear
 
-idiv
+mod
 /stackunderflow asserterror
 handleerror clear

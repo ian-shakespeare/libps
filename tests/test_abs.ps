@@ -1,0 +1,21 @@
+% test abs
+
+4.5 abs
+4.5 asserteq
+clear
+
+-3 abs
+3 asserteq
+clear
+
+0 abs
+0 asserteq
+clear
+
+(abc) abs
+/typecheck asserterror
+handleerror clear
+
+abs
+/stackunderflow asserterror
+handleerror clear

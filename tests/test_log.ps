@@ -1,0 +1,21 @@
+% test log
+
+10 log
+1.0 asserteq
+clear
+
+100 log
+2.0 asserteq
+clear
+
+-1 log
+/rangecheck asserterror
+handleerror clear
+
+(abc) log
+/typecheck asserterror
+handleerror clear
+
+log
+/stackunderflow asserterror
+handleerror clear

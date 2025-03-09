@@ -1,0 +1,19 @@
+% test sin
+
+/errormargin 0.000001 def
+
+90 sin
+1.0 errormargin assertnear
+clear
+
+0 sin
+0.0 errormargin assertnear
+clear
+
+(abc) sin
+/typecheck asserterror
+handleerror clear
+
+sin
+/stackunderflow asserterror
+handleerror clear

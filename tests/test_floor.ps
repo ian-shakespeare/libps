@@ -1,0 +1,21 @@
+% test floor
+
+3.2 floor
+3.0 asserteq
+clear
+
+-4.8 floor
+-5.0 asserteq
+clear
+
+99 floor
+99 asserteq
+clear
+
+(abc) floor
+/typecheck asserterror
+handleerror clear
+
+floor
+/stackunderflow asserterror
+handleerror clear

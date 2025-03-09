@@ -79,3 +79,13 @@ pub fn asserterror(ctx: &mut Context) -> crate::Result<()> {
 
     Ok(())
 }
+
+pub fn assertnear(ctx: &mut Context) -> crate::Result<()> {
+    let error_margin = ctx.pop_real()?;
+    let rhs = ctx.pop_real()?;
+    let lhs = ctx.pop_real()?;
+
+    assert!((lhs - rhs).abs() < error_margin);
+
+    Ok(())
+}

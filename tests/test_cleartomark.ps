@@ -2,3 +2,8 @@
 
 1 2 mark 3 4 5 cleartomark
 count 2 asserteq
+clear
+
+1 2 3 cleartomark
+/unmatchedmark asserterror
+handleerror clear

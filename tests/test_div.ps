@@ -2,10 +2,38 @@
 
 <</realtype true>> begin
 
-3 2 div dup
+3 2 div
+dup
 type assert
 1.5 asserteq
+clear
 
-4 2 div dup
+4 2 div
+dup
 type assert
 2.0 asserteq
+clear
+
+1 0 div
+/undefinedresult asserterror
+handleerror clear
+
+1.0 0.0 div
+/undefinedresult asserterror
+handleerror clear
+
+(abc) 2 div
+/typecheck asserterror
+handleerror clear
+
+1 (abc) div
+/typecheck asserterror
+handleerror clear
+
+1 div
+/stackunderflow asserterror
+handleerror clear
+
+div
+/stackunderflow asserterror
+handleerror clear

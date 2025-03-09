@@ -1,0 +1,13 @@
+% test srand
+
+2 srand
+rrand 2 asserteq
+clear
+
+(abc) srand
+/typecheck asserterror
+handleerror clear
+
+srand
+/stackunderflow asserterror
+handleerror clear

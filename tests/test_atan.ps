@@ -1,41 +1,37 @@
-% test idiv
+% test atan
 
-<</integertype true>> begin
-
-3 2 idiv
-dup
-type assert
-1 asserteq
+0 1 atan
+0.0 asserteq
 clear
 
-4 2 idiv
-dup
-type assert
-2 asserteq
+1 0 atan
+90.0 asserteq
 clear
 
--5 2 idiv
-dup
-type assert
--2 asserteq
+-100 0 atan
+270.0 asserteq
 clear
 
-1 0 idiv
+4 4 atan
+45.0 asserteq
+clear
+
+0 0 atan
 /undefinedresult asserterror
 handleerror clear
 
-(abc) 2 idiv
+(abc) 0 atan
 /typecheck asserterror
 handleerror clear
 
-1 (abc) idiv
+0 (abc) atan
 /typecheck asserterror
 handleerror clear
 
-2 idiv
+0 atan
 /stackunderflow asserterror
 handleerror clear
 
-idiv
+atan
 /stackunderflow asserterror
 handleerror clear

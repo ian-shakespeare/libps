@@ -1,0 +1,23 @@
+% test ln
+
+/errormargin 0.00001 def
+
+10 ln
+2.30259 errormargin assertnear
+clear
+
+100 ln
+4.60517 errormargin assertnear
+clear
+
+-1 ln
+/rangecheck asserterror
+handleerror clear
+
+(abc) ln
+/typecheck asserterror
+handleerror clear
+
+ln
+/stackunderflow asserterror
+handleerror clear
