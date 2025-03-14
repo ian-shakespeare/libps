@@ -4,6 +4,20 @@
 
 5 dict
 type assert
+clear
 
 <</key (value)>>
 type assert
+clear
+
+3.14 dict
+/typecheck asserterror
+handleerror clear
+
+-1 dict
+/limitcheck asserterror
+handleerror clear
+
+dict
+/stackunderflow asserterror
+handleerror clear

@@ -162,6 +162,7 @@ fn test_rand() -> TestResult {
     run_test("test_rand.ps")
 }
 
+// Covers both `srand` & `rrand`
 #[test]
 fn test_srand() -> TestResult {
     run_test("test_srand.ps")
@@ -193,11 +194,52 @@ fn test_getinterval() -> TestResult {
 }
 
 #[test]
+fn test_putinterval() -> TestResult {
+    run_test("test_putinterval.ps")
+}
+
+#[test]
+fn test_astore() -> TestResult {
+    run_test("test_astore.ps")
+}
+
+#[test]
+fn test_aload() -> TestResult {
+    run_test("test_aload.ps")
+}
+
+#[test]
 fn test_forall() -> TestResult {
     run_test("test_forall.ps")
+}
+
+// Covers both `setpacking` & `currentpacking`
+#[test]
+fn test_setpacking() -> TestResult {
+    run_test("test_setpacking.ps")
 }
 
 #[test]
 fn test_dict() -> TestResult {
     run_test("test_dict.ps")
+}
+
+#[test]
+fn test_maxlength() -> TestResult {
+    run_test("test_maxlength.ps")
+}
+
+#[test]
+fn test_begin() -> TestResult {
+    run_test("test_begin.ps")
+}
+
+#[test]
+fn test_end() -> TestResult {
+    run_test("test_end.ps")
+}
+
+#[test]
+fn test_def() -> TestResult {
+    run_test("test_def.ps")
 }

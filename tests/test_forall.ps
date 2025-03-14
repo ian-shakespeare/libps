@@ -9,3 +9,21 @@ clear
 received astore
 received [ 1 4 9 16 25 ] assertdeepeq
 clear
+
+% TODO: test for invalid access
+
+3.14 { add } forall
+/typecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] (bad) forall
+/typecheck asserterror
+handleerror clear
+
+{ add } forall
+/stackunderflow asserterror
+handleerror clear
+
+forall
+/stackunderflow asserterror
+handleerror clear

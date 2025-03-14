@@ -1,0 +1,17 @@
+% test def
+
+/ncnt 1 def
+/ncnt ncnt 1 add def
+2 ncnt assert eq
+clear
+
+% TODO: test invalid access
+% TODO: test typecheck, limitcheck?
+
+1 def
+/stackunderflow asserterror
+handleerror clear
+
+def
+/stackunderflow asserterror
+handleerror clear

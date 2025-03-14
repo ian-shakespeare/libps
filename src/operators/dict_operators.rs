@@ -2,10 +2,11 @@ use std::collections::HashMap;
 
 use crate::{object::DictionaryObject, Context, Error, ErrorKind, Object};
 
-use super::usize_to_i32;
+use super::{i32_to_usize, usize_to_i32};
 
 pub fn dict(ctx: &mut Context) -> crate::Result<()> {
-    let capacity = ctx.pop_usize()?;
+    // use `i32_to_usize` to send `limitcheck` errors
+    let capacity = i32_to_usize(ctx.pop_int()?)?;
 
     let idx = ctx
         .mem_mut()
@@ -48,7 +49,7 @@ pub fn maxlength(ctx: &mut Context) -> crate::Result<()> {
         return Err(Error::from(ErrorKind::InvalidAccess));
     }
 
-    let capacity = dict.len() + 1;
+    let capacity = dict.capacity();
 
     let capacity = usize_to_i32(capacity)?;
 
@@ -204,8 +205,12 @@ pub fn statusdict(_ctx: &mut Context) -> crate::Result<()> {
 }
 
 #[allow(dead_code)]
-pub fn countdictstack(_ctx: &mut Context) -> crate::Result<()> {
-    Err(Error::new(ErrorKind::Unregistered, "not implemented"))
+pub fn countdictstack(ctx: &mut Context) -> crate::Result<()> {
+    let count = usize_to_i32(ctx.dict_stack.len())?;
+
+    ctx.push(Object::Integer(count));
+
+    Ok(())
 }
 
 #[allow(dead_code)]

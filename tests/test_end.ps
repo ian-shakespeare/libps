@@ -1,0 +1,12 @@
+% test end
+
+1 dict begin
+
+/beforeend countdictstack def
+end
+countdictstack beforeend assertlt
+clear
+
+end
+/dictstackunderflow asserterror
+handleerror clear

@@ -372,6 +372,10 @@ impl DictionaryObject {
         self.inner.len()
     }
 
+    pub fn capacity(&self) -> usize {
+        self.inner.capacity()
+    }
+
     pub fn contains_key(&self, key: &str) -> bool {
         self.inner.contains_key(key)
     }

@@ -482,6 +482,8 @@ fn debug_dict() -> DictionaryObject {
         ("assertdeepeq", Object::Operator(assertdeepeq)),
         ("asserterror", Object::Operator(asserterror)),
         ("assertnear", Object::Operator(assertnear)),
+        ("assertgt", Object::Operator(assertgt)),
+        ("assertlt", Object::Operator(assertlt)),
     ];
 
     definitions.into_iter().fold(

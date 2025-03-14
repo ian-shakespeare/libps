@@ -1,0 +1,15 @@
+% test setpacking
+
+true setpacking
+true currentpacking asserteq
+
+false setpacking
+false currentpacking asserteq
+
+(abc) setpacking
+/typecheck asserterror
+handleerror clear
+
+setpacking
+/stackunderflow asserterror
+handleerror clear

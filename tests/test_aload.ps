@@ -1,0 +1,22 @@
+% test aload
+
+[ 23 (ab) -6 ] aload
+[ 23 (ab) -6 ] assertdeepeq
+-6 asserteq
+(ab) assertdeepeq
+23 asserteq
+clear
+
+% TODO: test invalid access
+
+3.14 aload
+/typecheck asserterror
+handleerror clear
+
+(abc) aload
+/typecheck asserterror
+handleerror clear
+
+aload
+/stackunderflow asserterror
+handleerror clear

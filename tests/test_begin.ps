@@ -1,0 +1,16 @@
+% test begin
+
+/mydict <</key (value)>> def
+mydict begin
+mydict currentdict asserteq
+clear
+
+% TODO: test invalid access
+
+(abc) begin
+/typecheck asserterror
+handleerror clear
+
+begin
+/stackunderflow asserterror
+handleerror clear

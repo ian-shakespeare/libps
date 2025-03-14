@@ -50,6 +50,15 @@ fn usize_to_i32(u: usize) -> crate::Result<i32> {
     Ok(i)
 }
 
+fn i32_to_usize(i: i32) -> crate::Result<usize> {
+    let u: usize = match i.try_into() {
+        Ok(i) => Ok(i),
+        Err(_) => Err(Error::from(ErrorKind::LimitCheck)),
+    }?;
+
+    Ok(u)
+}
+
 fn is_valid_real(n: f64) -> bool {
     n.is_finite() && !n.is_nan()
 }

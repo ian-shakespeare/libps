@@ -1,0 +1,47 @@
+% test putinterval
+
+/arr [ 1 2 3 4 5 ] def
+arr 1 [ (a) (b) (c) ] putinterval
+[ 1 (a) (b) (c) 5 ] arr assertdeepeq
+clear
+
+/str (abc) def
+str 1 (de) putinterval
+(ade) str assertdeepeq
+clear
+
+[ 1 2 3 ] -1 [ 0 ] putinterval
+/rangecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] 3 [ 0 ] putinterval
+/rangecheck asserterror
+handleerror clear
+
+[ 1 2 3 ] 2 [ 4 5 ] putinterval
+/rangecheck asserterror
+handleerror clear
+
+3.14 0 [ 1 ] putinterval
+/typecheck clear
+handleerror clear
+
+[ (a) (b) (c) ] 1 (de) putinterval
+/typecheck clear
+handleerror clear
+
+(abc) 1 [ (d) (e) ] putinterval
+/typecheck clear
+handleerror clear
+
+1 (de) putinterval
+/stackunderflow clear
+handleerror clear
+
+(de) putinterval
+/stackunderflow clear
+handleerror clear
+
+putinterval
+/stackunderflow clear
+handleerror clear

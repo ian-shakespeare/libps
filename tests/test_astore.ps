@@ -1,0 +1,22 @@
+% test astore
+
+(a) (bcd) (ef) 3 array astore
+[ (a) (bcd) (ef) ] assertdeepeq
+
+% TODO: test invalid access
+
+(a) 3.14 astore
+/typecheck asserterror
+handleerror clear
+
+(a) (b) 3 array astore
+/stackunderflow asserterror
+handleerror clear
+
+1 array astore
+/stackunderflow asserterror
+handleerror clear
+
+astore
+/stackunderflow asserterror
+handleerror clear

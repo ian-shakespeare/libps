@@ -89,3 +89,21 @@ pub fn assertnear(ctx: &mut Context) -> crate::Result<()> {
 
     Ok(())
 }
+
+pub fn assertgt(ctx: &mut Context) -> crate::Result<()> {
+    let rhs = ctx.pop_real()?;
+    let lhs = ctx.pop_real()?;
+
+    assert!(lhs > rhs);
+
+    Ok(())
+}
+
+pub fn assertlt(ctx: &mut Context) -> crate::Result<()> {
+    let rhs = ctx.pop_real()?;
+    let lhs = ctx.pop_real()?;
+
+    assert!(lhs < rhs);
+
+    Ok(())
+}

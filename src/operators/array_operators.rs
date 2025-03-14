@@ -4,10 +4,11 @@ use crate::{
     ArrayObject, Context, Error, ErrorKind, Object, StringObject,
 };
 
-use super::usize_to_i32;
+use super::{i32_to_usize, usize_to_i32};
 
 pub fn array(ctx: &mut Context) -> crate::Result<()> {
-    let len = ctx.pop_usize()?;
+    // use `i32_to_usize` to send `limitcheck` errors
+    let len = i32_to_usize(ctx.pop_int()?)?;
 
     let arr = ArrayObject::new(vec![Object::Null; len], Access::Unlimited, Mode::Literal);
     let idx = ctx.mem_mut().insert(arr);
@@ -225,27 +226,42 @@ pub fn getinterval(ctx: &mut Context) -> crate::Result<()> {
 }
 
 pub fn putinterval(ctx: &mut Context) -> crate::Result<()> {
-    let source = ctx.pop_array()?;
+    match ctx.pop()? {
+        Object::Array(idx) => {
+            let source = ctx.get_array(idx).cloned()?;
 
-    if !source.access().is_readable() {
-        return Err(Error::from(ErrorKind::InvalidAccess));
+            if !source.access().is_readable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            let offset = ctx.pop_usize()?;
+            let destination = ctx.pop_array_mut()?;
+
+            if !destination.access().is_writeable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            for (index, obj) in source.into_iter().enumerate() {
+                let dest_obj = destination.get_mut(index + offset)?;
+                *dest_obj = obj;
+            }
+
+            Ok(())
+        },
+        Object::String(idx) => {
+            let source = ctx.get_string(idx).cloned()?;
+            let offset = ctx.pop_usize()?;
+            let destination = ctx.pop_string_mut()?;
+
+            for (index, ch) in source.into_iter().enumerate() {
+                let dest_ch = destination.get_mut(index + offset)?;
+                *dest_ch = ch;
+            }
+
+            Ok(())
+        },
+        _ => Err(Error::new(ErrorKind::TypeCheck, "expected array or string")),
     }
-
-    let source = source.clone();
-
-    let index = ctx.pop_usize()?;
-    let destination = ctx.pop_array_mut()?;
-
-    if !destination.access().is_writeable() {
-        return Err(Error::from(ErrorKind::InvalidAccess));
-    }
-
-    for (offset, obj) in source.into_iter().enumerate() {
-        let dest_obj = destination.get_mut(index + offset)?;
-        *dest_obj = obj;
-    }
-
-    Ok(())
 }
 
 pub fn astore(ctx: &mut Context) -> crate::Result<()> {
@@ -290,9 +306,11 @@ pub fn aload(ctx: &mut Context) -> crate::Result<()> {
 
 pub fn forall(ctx: &mut Context) -> crate::Result<()> {
     let proc = ctx.pop()?;
-    let obj = ctx.pop()?;
+    if !proc.is_array() {
+        return Err(Error::new(ErrorKind::TypeCheck, "expected array"));
+    }
 
-    match obj {
+    match ctx.pop()? {
         Object::Array(idx) => {
             let arr = ctx.get_array(idx)?.clone();
 
