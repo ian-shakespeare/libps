@@ -117,7 +117,20 @@ pub fn store(ctx: &mut Context) -> crate::Result<()> {
     let key_obj = ctx.pop()?;
     let key = ctx.stringify(&key_obj)?;
 
-    let dict = ctx.find_dict_mut(&key)?;
+    let dict = match ctx.find_dict_mut(&key) {
+        Ok(dict) => dict,
+        Err(e) => {
+            if e.kind() != ErrorKind::Undefined {
+                return Err(e);
+            }
+
+            ctx.get_dict_mut(
+                *ctx.dict_stack
+                    .last()
+                    .ok_or(Error::from(ErrorKind::DictStackUnderflow))?,
+            )?
+        },
+    };
 
     dict.insert(key, value);
 

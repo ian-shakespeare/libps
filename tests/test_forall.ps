@@ -1,10 +1,12 @@
 % test forall
 
 0 [ 1 2 3 4 5 ] { add } forall
+assertnoerror
 15 asserteq
 clear
 
 [ 1 2 3 4 5 ] { dup mul } forall
+assertnoerror
 /received 5 array def
 received astore
 received [ 1 4 9 16 25 ] assertdeepeq

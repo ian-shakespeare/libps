@@ -1,24 +1,29 @@
 % test round
 
 3.2 round
+assertnoerror
 3.0 asserteq
 clear
 
 6.5 round
+assertnoerror
 7.0 asserteq
 clear
 
 -4.8 round
+assertnoerror
 -5.0 asserteq
 clear
 
 -6.5 round
+assertnoerror
 -6.0 asserteq
 clear
 
 <</integertype true>> begin
 
 99 round
+assertnoerror
 dup
 type assert
 99 asserteq

@@ -1,0 +1,17 @@
+% test load
+
+/avg { add 2 div } def
+/avg load
+assertnoerror
+{ add 2 div } assertdeepeq
+clear
+
+% TODO: test invalid access
+
+/bad load
+/undefined asserterror
+handleerror clear
+
+load
+/stackunderflow asserterror
+handleerror clear

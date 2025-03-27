@@ -1,8 +1,10 @@
 % test def
 
 /ncnt 1 def
+assertnoerror
 /ncnt ncnt 1 add def
-2 ncnt assert eq
+assertnoerror
+2 ncnt asserteq
 clear
 
 % TODO: test invalid access

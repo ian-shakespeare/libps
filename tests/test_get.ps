@@ -1,14 +1,17 @@
 % test get
 
 [ 1 2 3 4 5 ] 2 get
+assertnoerror
 3 asserteq
 clear
 
 <</key (value)>> (key) get
+assertnoerror
 (value) assertdeepeq
 clear
 
 /c_ascii_code 99 def
+assertnoerror
 (abcde) 2 get
 c_ascii_code asserteq
 clear

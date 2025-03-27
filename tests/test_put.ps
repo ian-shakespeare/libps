@@ -2,14 +2,17 @@
 
 /received 5 array def
 received 2 (value) put
+assertnoerror
 [ null null (value) null null ] received assertdeepeq
 
 /received 1 dict def
 received (key) (value) put
+assertnoerror
 <</key (value)>> received assertdeepeq
 
 /received (abc) def
 received 1 100  put
+assertnoerror
 (adc) received assertdeepeq
 
 % TODO: test for invalid access

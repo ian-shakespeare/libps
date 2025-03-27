@@ -1,6 +1,10 @@
 % test count
 
-count 0 asserteq
+count
+assertnoerror
+0 asserteq
 clear
 
-1 2 3 count 3 asserteq
+1 2 3 count
+assertnoerror
+3 asserteq

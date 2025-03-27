@@ -1,6 +1,7 @@
 % test roll
 
 (a) (b) (c) 3 -1 roll
+assertnoerror
 count 3 asserteq
 /received 3 array def
 received astore
@@ -8,6 +9,7 @@ received astore
 clear
 
 (a) (b) (c) 3 1 roll
+assertnoerror
 count 3 asserteq
 /received 3 array def
 received astore
@@ -15,6 +17,7 @@ received astore
 clear
 
 (a) (b) (c) 3 0 roll
+assertnoerror
 count 3 asserteq
 /received 3 array def
 received astore

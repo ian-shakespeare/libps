@@ -1,7 +1,9 @@
 % test maxlength
 
 /mydict 5 dict def
-mydict maxlength 5 assertgt
+mydict maxlength
+assertnoerror
+5 assertgt
 clear
 
 % TODO: test for invalid access

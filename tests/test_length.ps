@@ -1,18 +1,22 @@
 % test length
 
 [ 1 2 3 ] length
+assertnoerror
 3 asserteq
 clear
 
 <</key1 (value) /key2 (value)>> length
+assertnoerror
 2 asserteq
 clear
 
 (abc) length
+assertnoerror
 3 asserteq
 clear
 
 /abc length
+assertnoerror
 3 asserteq
 clear
 

@@ -1,5 +1,5 @@
 use core::str;
-use std::collections::HashMap;
+use std::{collections::HashMap, ptr};
 
 use crate::{context::Context, Error, ErrorKind};
 
@@ -175,6 +175,7 @@ impl PartialEq for Object {
             (Object::Name(lhs), Object::Name(rhs)) => lhs == rhs,
             (Object::Array(lhs), Object::Array(rhs)) => lhs == rhs,
             (Object::Dictionary(lhs), Object::Dictionary(rhs)) => lhs == rhs,
+            (Object::Operator(lhs), Object::Operator(rhs)) => ptr::fn_addr_eq(*lhs, *rhs),
             (Object::Mark, Object::Mark) => true,
             (Object::Null, Object::Null) => true,
             _ => false,

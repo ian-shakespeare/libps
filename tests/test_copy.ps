@@ -1,6 +1,7 @@
 % test copy
 
 (a) (b) (c) 2 copy
+assertnoerror
 count 5 asserteq
 /received 5 array def
 received astore
@@ -8,6 +9,7 @@ received astore
 clear
 
 (a) (b) (c) 0 copy
+assertnoerror
 count 3 asserteq
 /received 3 array def
 received astore
@@ -17,6 +19,7 @@ clear
 /source [ 1 2 3 4 5 ] def
 /target 5 array def
 source target copy
+assertnoerror
 target asserteq
 source target assertdeepeq
 clear
@@ -24,6 +27,7 @@ clear
 /source <</key1 (value) /key2 (value)>> def
 /target 1 dict def
 source target copy
+assertnoerror
 target asserteq
 source target assertdeepeq
 clear
@@ -31,6 +35,7 @@ clear
 /source (abcde) def
 /target (_____) def
 source target copy
+assertnoerror
 target asserteq
 source target assertdeepeq
 clear

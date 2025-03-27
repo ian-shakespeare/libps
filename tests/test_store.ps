@@ -1,0 +1,21 @@
+% test store
+
+/abc 123 store
+assertnoerror
+
+1 dict begin
+/abc 456 store
+assertnoerror
+currentdict /abc known
+false asserteq
+abc 456 asserteq
+clear
+
+% TODO: test invalid access
+
+123 store
+/stackunderflow asserterror
+handleerror clear
+
+store asserterror
+handleerror clear

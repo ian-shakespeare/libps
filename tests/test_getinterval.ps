@@ -1,15 +1,19 @@
 % test getinterval
 
 [ 1 2 3 4 5 ] 1 3 getinterval
+assertnoerror
 [ 2 3 4 ] assertdeepeq
 
 [ 1 2 3 4 5 ] 0 0 getinterval
+assertnoerror
 [] assertdeepeq
 
 (abcde) 1 3 getinterval
+assertnoerror
 (bcd) assertdeepeq
 
 (abcde) 0 0 getinterval
+assertnoerror
 () assertdeepeq
 
 [ 1 2 3 4 5 ] -1 3 getinterval

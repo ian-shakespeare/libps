@@ -1,10 +1,16 @@
 % test setpacking
 
 true setpacking
-true currentpacking asserteq
+assertnoerror
+true currentpacking
+assertnoerror
+asserteq
 
 false setpacking
-false currentpacking asserteq
+assertnoerror
+false currentpacking
+assertnoerror
+asserteq
 
 (abc) setpacking
 /typecheck asserterror

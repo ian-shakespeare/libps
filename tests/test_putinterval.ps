@@ -2,11 +2,13 @@
 
 /arr [ 1 2 3 4 5 ] def
 arr 1 [ (a) (b) (c) ] putinterval
+assertnoerror
 [ 1 (a) (b) (c) 5 ] arr assertdeepeq
 clear
 
 /str (abc) def
 str 1 (de) putinterval
+assertnoerror
 (ade) str assertdeepeq
 clear
 

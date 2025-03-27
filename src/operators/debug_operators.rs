@@ -80,6 +80,18 @@ pub fn asserterror(ctx: &mut Context) -> crate::Result<()> {
     Ok(())
 }
 
+pub fn assertnoerror(ctx: &mut Context) -> crate::Result<()> {
+    let idx = ctx.find_def("$error").cloned()?.into_index()?;
+    let error_info = ctx.get_dict(idx)?;
+
+    let is_new = error_info
+        .get("newerror")
+        .is_ok_and(|b| matches!(b, Object::Boolean(true)));
+    assert!(!is_new, "received an unexpected error");
+
+    Ok(())
+}
+
 pub fn assertnear(ctx: &mut Context) -> crate::Result<()> {
     let error_margin = ctx.pop_real()?;
     let rhs = ctx.pop_real()?;

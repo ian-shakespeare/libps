@@ -1,16 +1,19 @@
 % test truncate
 
 3.2 truncate
+assertnoerror
 3.0 asserteq
 clear
 
 -4.8 truncate
+assertnoerror
 -4.0 asserteq
 clear
 
 <</integertype true>> begin
 
 99 truncate
+assertnoerror
 dup
 type assert
 99 asserteq

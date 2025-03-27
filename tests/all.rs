@@ -243,3 +243,13 @@ fn test_end() -> TestResult {
 fn test_def() -> TestResult {
     run_test("test_def.ps")
 }
+
+#[test]
+fn test_load() -> TestResult {
+    run_test("test_load.ps")
+}
+
+#[test]
+fn test_store() -> TestResult {
+    run_test("test_store.ps")
+}
