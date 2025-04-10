@@ -2,8 +2,7 @@ use std::collections::HashMap;
 
 use crate::{
     container::Container,
-    object::{Access, Composite, DictionaryObject, Mode, Object},
-    operators::*,
+    object::{Access, Composite, DictionaryObject, Mode, Object, OperatorObject},
     rand::RandomNumberGenerator,
     ArrayObject, Error, ErrorKind, StringObject,
 };
@@ -49,20 +48,6 @@ impl Default for Context {
 }
 
 impl Context {
-    pub fn with_debug_utils() -> Self {
-        let mut ctx = Context::default();
-
-        let global_dict = ctx
-            .get_dict_mut(ctx.dict_stack[1])
-            .expect("failed to get global dict");
-
-        for (key, op) in debug_dict().into_iter() {
-            global_dict.insert(key, op);
-        }
-
-        ctx
-    }
-
     pub fn find_def<S>(&self, key: S) -> crate::Result<&Object>
     where
         S: AsRef<str>,
@@ -301,113 +286,81 @@ fn system_dict(mem: &mut Container<Composite>) -> DictionaryObject {
     let error_info_idx = mem.insert(error_info_dict());
 
     let definitions = [
-        ("dup", Object::Operator(dup)),
-        ("exch", Object::Operator(exch)),
+        ("dup", Object::Operator(OperatorObject::Dup)),
+        ("exch", Object::Operator(OperatorObject::Exch)),
+        ("pop", Object::Operator(OperatorObject::Pop)),
+        ("copy", Object::Operator(OperatorObject::Copy)),
+        ("roll", Object::Operator(OperatorObject::Roll)),
+        ("index", Object::Operator(OperatorObject::Index)),
+        ("mark", Object::Mark),
+        ("clear", Object::Operator(OperatorObject::Clear)),
+        ("count", Object::Operator(OperatorObject::Count)),
+        ("counttomark", Object::Operator(OperatorObject::Counttomark)),
+        ("cleartomark", Object::Operator(OperatorObject::Cleartomark)),
+        ("add", Object::Operator(OperatorObject::Add)),
+        ("div", Object::Operator(OperatorObject::Div)),
+        ("idiv", Object::Operator(OperatorObject::Idiv)),
+        ("mod", Object::Operator(OperatorObject::Mod)),
+        ("mul", Object::Operator(OperatorObject::Mul)),
+        ("sub", Object::Operator(OperatorObject::Sub)),
+        ("abs", Object::Operator(OperatorObject::Abs)),
+        ("neg", Object::Operator(OperatorObject::Neg)),
+        ("ceiling", Object::Operator(OperatorObject::Ceiling)),
+        ("floor", Object::Operator(OperatorObject::Floor)),
+        ("round", Object::Operator(OperatorObject::Round)),
+        ("truncate", Object::Operator(OperatorObject::Truncate)),
+        ("sqrt", Object::Operator(OperatorObject::Sqrt)),
+        ("atan", Object::Operator(OperatorObject::Atan)),
+        ("cos", Object::Operator(OperatorObject::Cos)),
+        ("sin", Object::Operator(OperatorObject::Sin)),
+        ("exp", Object::Operator(OperatorObject::Exp)),
+        ("ln", Object::Operator(OperatorObject::Ln)),
+        ("log", Object::Operator(OperatorObject::Log)),
+        ("rand", Object::Operator(OperatorObject::Rand)),
+        ("srand", Object::Operator(OperatorObject::Srand)),
+        ("rrand", Object::Operator(OperatorObject::Rrand)),
+        ("array", Object::Operator(OperatorObject::Array)),
+        ("[", Object::Mark),
+        ("]", Object::Operator(OperatorObject::EndArray)),
+        ("length", Object::Operator(OperatorObject::Length)),
+        ("get", Object::Operator(OperatorObject::Get)),
+        ("put", Object::Operator(OperatorObject::Put)),
+        ("getinterval", Object::Operator(OperatorObject::Getinterval)),
+        ("putinterval", Object::Operator(OperatorObject::Putinterval)),
+        ("astore", Object::Operator(OperatorObject::Astore)),
+        ("aload", Object::Operator(OperatorObject::Aload)),
+        ("forall", Object::Operator(OperatorObject::Forall)),
+        ("packedarray", Object::Operator(OperatorObject::Packedarray)),
+        ("setpacking", Object::Operator(OperatorObject::Setpacking)),
         (
-            "pop",
-            Object::Operator(|ctx| {
-                ctx.pop()?;
-                Ok(())
-            }),
+            "currentpacking",
+            Object::Operator(OperatorObject::Currentpacking),
         ),
-        ("copy", Object::Operator(copy)),
-        ("roll", Object::Operator(roll)),
-        ("index", Object::Operator(index)),
-        ("mark", Object::Operator(mark)),
-        ("clear", Object::Operator(clear)),
-        ("count", Object::Operator(count)),
-        ("counttomark", Object::Operator(counttomark)),
-        ("cleartomark", Object::Operator(cleartomark)),
-        (
-            "add",
-            Object::Operator(|ctx| arithmetic(ctx, i32::checked_add, |a: f64, b: f64| a + b)),
-        ),
-        (
-            "div",
-            Object::Operator(|ctx| arithmetic(ctx, |_, _| None, |a: f64, b: f64| a / b)),
-        ),
-        ("idiv", Object::Operator(idiv)),
-        ("mod", Object::Operator(imod)),
-        (
-            "mul",
-            Object::Operator(|ctx| arithmetic(ctx, i32::checked_mul, |a: f64, b: f64| a * b)),
-        ),
-        (
-            "sub",
-            Object::Operator(|ctx| arithmetic(ctx, i32::checked_sub, |a: f64, b: f64| a - b)),
-        ),
-        (
-            "abs",
-            Object::Operator(|ctx| num_unary(ctx, i32::checked_abs, f64::abs)),
-        ),
-        (
-            "neg",
-            Object::Operator(|ctx| num_unary(ctx, i32::checked_neg, |a: f64| -1.0 * a)),
-        ),
-        (
-            "ceiling",
-            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::ceil)),
-        ),
-        (
-            "floor",
-            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::floor)),
-        ),
-        ("round", Object::Operator(round)),
-        (
-            "truncate",
-            Object::Operator(|ctx| num_unary(ctx, |a: i32| Some(a), f64::trunc)),
-        ),
-        ("sqrt", Object::Operator(sqrt)),
-        ("atan", Object::Operator(atan)),
-        ("cos", Object::Operator(cos)),
-        ("sin", Object::Operator(sin)),
-        (
-            "exp",
-            Object::Operator(|ctx| {
-                arithmetic(ctx, |_, _| None, |base: f64, exp: f64| base.powf(exp))
-            }),
-        ),
-        ("ln", Object::Operator(ln)),
-        ("log", Object::Operator(log)),
-        ("rand", Object::Operator(rand)),
-        ("srand", Object::Operator(srand)),
-        ("rrand", Object::Operator(rrand)),
-        ("array", Object::Operator(array)),
-        ("[", Object::Operator(mark)),
-        ("]", Object::Operator(endarray)),
-        ("length", Object::Operator(length)),
-        ("get", Object::Operator(get)),
-        ("put", Object::Operator(put)),
-        ("getinterval", Object::Operator(getinterval)),
-        ("putinterval", Object::Operator(putinterval)),
-        ("astore", Object::Operator(astore)),
-        ("aload", Object::Operator(aload)),
-        ("forall", Object::Operator(forall)),
-        ("packedarray", Object::Operator(packedarray)),
-        ("setpacking", Object::Operator(setpacking)),
-        ("currentpacking", Object::Operator(currentpacking)),
-        ("dict", Object::Operator(dict)),
-        ("<<", Object::Operator(mark)),
-        (">>", Object::Operator(enddict)),
-        ("maxlength", Object::Operator(maxlength)),
-        ("begin", Object::Operator(begin)),
-        ("end", Object::Operator(end)),
-        ("def", Object::Operator(def)),
-        ("load", Object::Operator(load)),
-        ("store", Object::Operator(store)),
-        ("undef", Object::Operator(undef)),
-        ("known", Object::Operator(known)),
-        ("where", Object::Operator(wheredef)),
-        ("currentdict", Object::Operator(currentdict)),
+        ("dict", Object::Operator(OperatorObject::Dict)),
+        ("<<", Object::Mark),
+        (">>", Object::Operator(OperatorObject::EndDict)),
+        ("maxlength", Object::Operator(OperatorObject::Maxlength)),
+        ("begin", Object::Operator(OperatorObject::Begin)),
+        ("end", Object::Operator(OperatorObject::End)),
+        ("def", Object::Operator(OperatorObject::Def)),
+        ("load", Object::Operator(OperatorObject::Load)),
+        ("store", Object::Operator(OperatorObject::Store)),
+        ("undef", Object::Operator(OperatorObject::Undef)),
+        ("known", Object::Operator(OperatorObject::Known)),
+        ("where", Object::Operator(OperatorObject::Where)),
+        ("currentdict", Object::Operator(OperatorObject::Currentdict)),
         ("errordict", Object::Dictionary(error_dict_idx)),
         ("$error", Object::Dictionary(error_info_idx)),
-        ("countdictstack", Object::Operator(countdictstack)),
-        ("eq", Object::Operator(eq)),
+        (
+            "countdictstack",
+            Object::Operator(OperatorObject::Countdictstack),
+        ),
+        ("eq", Object::Operator(OperatorObject::Eq)),
         ("true", Object::Boolean(true)),
         ("false", Object::Boolean(false)),
-        ("type", Object::Operator(gettype)),
-        ("null", Object::Operator(null)),
-        ("handleerror", Object::Operator(handleerror)),
+        ("type", Object::Operator(OperatorObject::Type)),
+        ("null", Object::Null),
+        ("handleerror", Object::Operator(OperatorObject::Handleerror)),
     ];
 
     definitions.into_iter().fold(
@@ -423,30 +376,27 @@ fn error_dict() -> DictionaryObject {
     let definitions = [
         (
             ErrorKind::DictStackUnderflow,
-            Object::Operator(dictstackunderflow),
+            OperatorObject::Dictstackunderflow,
         ),
-        (ErrorKind::InvalidAccess, Object::Operator(invalidaccess)),
-        (ErrorKind::IoError, Object::Operator(ioerror)),
-        (ErrorKind::LimitCheck, Object::Operator(limitcheck)),
-        (ErrorKind::RangeCheck, Object::Operator(rangecheck)),
-        (ErrorKind::StackUnderflow, Object::Operator(stackunderflow)),
-        (ErrorKind::SyntaxError, Object::Operator(syntaxerror)),
-        (ErrorKind::TypeCheck, Object::Operator(typecheck)),
-        (ErrorKind::Undefined, Object::Operator(undefined)),
-        (
-            ErrorKind::UndefinedResult,
-            Object::Operator(undefinedresult),
-        ),
-        (ErrorKind::UnmatchedMark, Object::Operator(unmatchedmark)),
-        (ErrorKind::Unregistered, Object::Operator(unregistered)),
-        (ErrorKind::VmError, Object::Operator(vmerror)),
+        (ErrorKind::InvalidAccess, OperatorObject::Invalidaccess),
+        (ErrorKind::IoError, OperatorObject::Ioerror),
+        (ErrorKind::LimitCheck, OperatorObject::Limitcheck),
+        (ErrorKind::RangeCheck, OperatorObject::Rangecheck),
+        (ErrorKind::StackUnderflow, OperatorObject::Stackunderflow),
+        (ErrorKind::SyntaxError, OperatorObject::Syntaxerror),
+        (ErrorKind::TypeCheck, OperatorObject::Typecheck),
+        (ErrorKind::Undefined, OperatorObject::Undefined),
+        (ErrorKind::UndefinedResult, OperatorObject::Undefinedresult),
+        (ErrorKind::UnmatchedMark, OperatorObject::Unmatchedmark),
+        (ErrorKind::Unregistered, OperatorObject::Unregistered),
+        (ErrorKind::VmError, OperatorObject::Vmerror),
     ];
 
     definitions.into_iter().fold(
         DictionaryObject::new(HashMap::new(), Access::Unlimited, Mode::default()),
-        |mut dict, (key, obj)| {
+        |mut dict, (key, op)| {
             let key: &str = key.into();
-            dict.insert(key, obj);
+            dict.insert(key, Object::Operator(op));
             dict
         },
     )
@@ -464,28 +414,6 @@ fn error_info_dict() -> DictionaryObject {
         // TODO: actually record all stacks and set this to true
         ("recordstacks", Object::Boolean(false)),
         ("binary", Object::Boolean(false)),
-    ];
-
-    definitions.into_iter().fold(
-        DictionaryObject::new(HashMap::new(), Access::Unlimited, Mode::default()),
-        |mut dict, (key, obj)| {
-            dict.insert(key, obj);
-            dict
-        },
-    )
-}
-
-fn debug_dict() -> DictionaryObject {
-    let definitions = [
-        ("assert", Object::Operator(assert)),
-        ("asserteq", Object::Operator(asserteq)),
-        ("assertne", Object::Operator(assertne)),
-        ("assertdeepeq", Object::Operator(assertdeepeq)),
-        ("asserterror", Object::Operator(asserterror)),
-        ("assertnoerror", Object::Operator(assertnoerror)),
-        ("assertnear", Object::Operator(assertnear)),
-        ("assertgt", Object::Operator(assertgt)),
-        ("assertlt", Object::Operator(assertlt)),
     ];
 
     definitions.into_iter().fold(

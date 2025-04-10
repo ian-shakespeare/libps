@@ -1,0 +1,73 @@
+% @param bool
+/assert {
+  true ne {
+    (FAIL: expected true, received false) print flush
+    quit
+  } if 
+} def
+
+% @param any
+% @param any
+/asserteq {
+  eq assert
+} def
+
+% @param any
+% @param any
+/assertne {
+  ne assert
+} def
+
+% @param composite
+% @param composite
+/assertdeepeq {
+  2 dict begin
+
+  /rhs exch def
+  /lhs exch def
+
+  lhs length rhs length asserteq
+  lhs type rhs type asserteq
+
+  /arraytype lhs type eq
+  /packedarraytype lhs type eq or {
+    /i 0 def
+    {
+      lhs length i ge {
+        exit
+      } if
+
+      lhs i get rhs i get assertdeepeq
+
+      /i i 1 add store
+    } loop
+  } if
+
+  /dicttype lhs type eq {
+    lhs {
+      exch rhs exch get assertdeepeq
+    } forall
+  } if
+
+  /arraytype lhs type ne
+  /packedarraytype lhs type ne and
+  /dicttype lhs type ne and {
+    lhs rhs asserteq
+  } if
+
+  clear
+  end
+} def
+
+% @param name
+/asserterror {
+  $error (newerror) get assert
+  $error errorname get asserteq
+} def
+
+/assertnoerror {
+  $error (newerror) get {
+    (FAIL: received unexpected error) print flush
+    quit
+  } if
+} def

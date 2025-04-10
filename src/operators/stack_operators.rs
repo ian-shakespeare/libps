@@ -158,12 +158,6 @@ pub fn index(ctx: &mut Context) -> crate::Result<()> {
     }
 }
 
-pub fn mark(ctx: &mut Context) -> crate::Result<()> {
-    ctx.push(Object::Mark);
-
-    Ok(())
-}
-
 pub fn clear(ctx: &mut Context) -> crate::Result<()> {
     ctx.operand_stack.clear();
 

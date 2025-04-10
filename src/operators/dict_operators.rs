@@ -185,7 +185,6 @@ pub fn wheredef(ctx: &mut Context) -> crate::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn currentdict(ctx: &mut Context) -> crate::Result<()> {
     let idx = ctx
         .dict_stack
@@ -197,27 +196,22 @@ pub fn currentdict(ctx: &mut Context) -> crate::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn errorstatus(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }
 
-#[allow(dead_code)]
 pub fn userdict(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }
 
-#[allow(dead_code)]
 pub fn globaldict(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }
 
-#[allow(dead_code)]
 pub fn statusdict(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }
 
-#[allow(dead_code)]
 pub fn countdictstack(ctx: &mut Context) -> crate::Result<()> {
     let count = usize_to_i32(ctx.dict_stack.len())?;
 
@@ -226,12 +220,10 @@ pub fn countdictstack(ctx: &mut Context) -> crate::Result<()> {
     Ok(())
 }
 
-#[allow(dead_code)]
 pub fn dictstack(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }
 
-#[allow(dead_code)]
 pub fn cleardictstack(_ctx: &mut Context) -> crate::Result<()> {
     Err(Error::new(ErrorKind::Unregistered, "not implemented"))
 }

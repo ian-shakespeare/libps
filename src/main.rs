@@ -25,10 +25,6 @@ fn main() -> io::Result<()> {
 
         input.read_line(&mut buf)?;
 
-        if buf.starts_with(".quit") {
-            break;
-        }
-
         if let Err(e) = evaluate(&mut ctx, &buf) {
             fatal(&e.to_string());
         }
@@ -39,6 +35,4 @@ fn main() -> io::Result<()> {
 
         buf.clear();
     }
-
-    Ok(())
 }

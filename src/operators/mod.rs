@@ -1,11 +1,9 @@
 use std::f64::consts;
 
 pub use array_operators::*;
-pub use debug_operators::*;
 pub use dict_operators::*;
 pub use error_operators::*;
 pub use math_operators::*;
-pub use misc_operators::*;
 pub use relational_operators::*;
 pub use stack_operators::*;
 pub use type_operators::*;
@@ -13,11 +11,9 @@ pub use type_operators::*;
 use crate::{Error, ErrorKind};
 
 mod array_operators;
-mod debug_operators;
 mod dict_operators;
 mod error_operators;
 mod math_operators;
-mod misc_operators;
 mod relational_operators;
 mod stack_operators;
 mod type_operators;

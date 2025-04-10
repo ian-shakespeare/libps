@@ -3,7 +3,7 @@ use std::io;
 pub use context::Context;
 pub use error::{Error, ErrorKind};
 use lexer::Lexer;
-use object::{Access, DictionaryObject, Mode};
+use object::{Access, DictionaryObject, Mode, OperatorObject};
 pub use object::{ArrayObject, Object, StringObject};
 
 mod container;
@@ -87,9 +87,122 @@ fn execute_object(ctx: &mut Context, obj: Object) {
             };
             execute_object(ctx, obj);
         },
-        Object::Operator(operator) => {
-            if let Err(e) = operator(ctx) {
-                handle_error(ctx, e, obj, snapshot).expect("failed to handle error");
+        Object::Operator(op) => {
+            if let Err(e) = match op {
+                OperatorObject::Dup => operators::dup(ctx),
+                OperatorObject::Exch => operators::exch(ctx),
+                OperatorObject::Pop => match ctx.pop() {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
+                },
+                OperatorObject::Copy => operators::copy(ctx),
+                OperatorObject::Roll => operators::roll(ctx),
+                OperatorObject::Index => operators::index(ctx),
+                OperatorObject::Clear => operators::clear(ctx),
+                OperatorObject::Count => operators::count(ctx),
+                OperatorObject::Counttomark => operators::counttomark(ctx),
+                OperatorObject::Cleartomark => operators::cleartomark(ctx),
+                OperatorObject::Add => {
+                    operators::arithmetic(ctx, i32::checked_add, |a: f64, b: f64| a + b)
+                },
+                OperatorObject::Div => {
+                    operators::arithmetic(ctx, |_, _| None, |a: f64, b: f64| a / b)
+                },
+                OperatorObject::Idiv => operators::idiv(ctx),
+                OperatorObject::Mod => operators::imod(ctx),
+                OperatorObject::Mul => {
+                    operators::arithmetic(ctx, i32::checked_mul, |a: f64, b: f64| a * b)
+                },
+                OperatorObject::Sub => {
+                    operators::arithmetic(ctx, i32::checked_sub, |a: f64, b: f64| a - b)
+                },
+                OperatorObject::Abs => operators::num_unary(ctx, i32::checked_abs, f64::abs),
+                OperatorObject::Neg => {
+                    operators::num_unary(ctx, i32::checked_neg, |a: f64| -1.0 * a)
+                },
+                OperatorObject::Ceiling => operators::num_unary(ctx, |a: i32| Some(a), f64::ceil),
+                OperatorObject::Floor => operators::num_unary(ctx, |a: i32| Some(a), f64::floor),
+                OperatorObject::Round => operators::round(ctx),
+                OperatorObject::Truncate => operators::num_unary(ctx, |a: i32| Some(a), f64::trunc),
+                OperatorObject::Sqrt => operators::sqrt(ctx),
+                OperatorObject::Atan => operators::atan(ctx),
+                OperatorObject::Cos => operators::cos(ctx),
+                OperatorObject::Sin => operators::sin(ctx),
+                OperatorObject::Exp => {
+                    operators::arithmetic(ctx, |_, _| None, |base: f64, exp: f64| base.powf(exp))
+                },
+                OperatorObject::Ln => operators::ln(ctx),
+                OperatorObject::Log => operators::log(ctx),
+                OperatorObject::Rand => operators::rand(ctx),
+                OperatorObject::Srand => operators::srand(ctx),
+                OperatorObject::Rrand => operators::rrand(ctx),
+                OperatorObject::Array => operators::array(ctx),
+                OperatorObject::EndArray => operators::endarray(ctx),
+                OperatorObject::Length => operators::length(ctx),
+                OperatorObject::Get => operators::get(ctx),
+                OperatorObject::Put => operators::put(ctx),
+                OperatorObject::Getinterval => operators::getinterval(ctx),
+                OperatorObject::Putinterval => operators::putinterval(ctx),
+                OperatorObject::Astore => operators::astore(ctx),
+                OperatorObject::Aload => operators::aload(ctx),
+                OperatorObject::Forall => operators::forall(ctx),
+                OperatorObject::Packedarray => operators::packedarray(ctx),
+                OperatorObject::Setpacking => operators::setpacking(ctx),
+                OperatorObject::Currentpacking => operators::currentpacking(ctx),
+                OperatorObject::Dict => operators::dict(ctx),
+                OperatorObject::EndDict => operators::enddict(ctx),
+                OperatorObject::Maxlength => operators::maxlength(ctx),
+                OperatorObject::Begin => operators::begin(ctx),
+                OperatorObject::End => operators::end(ctx),
+                OperatorObject::Def => operators::def(ctx),
+                OperatorObject::Load => operators::load(ctx),
+                OperatorObject::Store => operators::store(ctx),
+                OperatorObject::Undef => operators::undef(ctx),
+                OperatorObject::Known => operators::known(ctx),
+                OperatorObject::Where => operators::wheredef(ctx),
+                OperatorObject::Currentdict => operators::currentdict(ctx),
+                OperatorObject::Countdictstack => operators::countdictstack(ctx),
+                OperatorObject::Eq => operators::eq(ctx),
+                OperatorObject::Type => operators::gettype(ctx),
+                OperatorObject::Handleerror => operators::handleerror(ctx),
+                OperatorObject::Dictstackunderflow => {
+                    operators::recover_from_error(ctx, ErrorKind::DictStackUnderflow)
+                },
+                OperatorObject::Invalidaccess => {
+                    operators::recover_from_error(ctx, ErrorKind::InvalidAccess)
+                },
+                OperatorObject::Ioerror => operators::recover_from_error(ctx, ErrorKind::IoError),
+                OperatorObject::Limitcheck => {
+                    operators::recover_from_error(ctx, ErrorKind::LimitCheck)
+                },
+                OperatorObject::Rangecheck => {
+                    operators::recover_from_error(ctx, ErrorKind::RangeCheck)
+                },
+                OperatorObject::Stackunderflow => {
+                    operators::recover_from_error(ctx, ErrorKind::StackUnderflow)
+                },
+                OperatorObject::Syntaxerror => {
+                    operators::recover_from_error(ctx, ErrorKind::SyntaxError)
+                },
+                OperatorObject::Typecheck => {
+                    operators::recover_from_error(ctx, ErrorKind::TypeCheck)
+                },
+                OperatorObject::Undefined => {
+                    operators::recover_from_error(ctx, ErrorKind::Undefined)
+                },
+                OperatorObject::Undefinedresult => {
+                    operators::recover_from_error(ctx, ErrorKind::UndefinedResult)
+                },
+                OperatorObject::Unmatchedmark => {
+                    operators::recover_from_error(ctx, ErrorKind::UnmatchedMark)
+                },
+                OperatorObject::Unregistered => {
+                    operators::recover_from_error(ctx, ErrorKind::Unregistered)
+                },
+                OperatorObject::Vmerror => operators::recover_from_error(ctx, ErrorKind::VmError),
+            } {
+                handle_error(ctx, e, Object::Operator(op), snapshot)
+                    .expect("failed to handle error");
             }
         },
         _ => {

@@ -2,11 +2,17 @@ use std::{error, fs};
 
 use libps::{evaluate, Context};
 
+mod common;
+
 type TestResult = Result<(), Box<dyn error::Error>>;
 
 fn run_test(test_name: &str) -> TestResult {
     let input = fs::read_to_string(format!("tests/{test_name}"))?;
-    let mut ctx = Context::with_debug_utils();
+    let mut ctx = Context::default();
+
+    let assert_definitions = include_str!("assert.ps");
+    evaluate(&mut ctx, assert_definitions).expect("failed to evaluate assert definitions");
+
     evaluate(&mut ctx, &input)?;
 
     Ok(())
