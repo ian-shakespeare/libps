@@ -38,6 +38,10 @@ impl Interpreter {
     pub fn new(stdout: StdoutLock<'static>) -> Self {
         let mut system_dict = DictionaryObject::default();
         system_dict.insert(
+            Object::String(Rc::new(RefCell::new("exec".into()))),
+            Object::Operator((OperatorObject::Exec, Mode::Executable)),
+        );
+        system_dict.insert(
             Object::String(Rc::new(RefCell::new("flush".into()))),
             Object::Operator((OperatorObject::Flush, Mode::Executable)),
         );
@@ -78,6 +82,7 @@ impl Interpreter {
                 self.exec()
             },
             Object::Operator((operator, _)) => match operator {
+                OperatorObject::Exec => self.exec(),
                 OperatorObject::Flush => self.flush(),
                 OperatorObject::Print => self.print(),
                 OperatorObject::Quit => process::exit(0),
@@ -121,9 +126,9 @@ impl Interpreter {
         self.transaction_stack.clear();
     }
 
-    fn initiate_error(&mut self, e: Error) {
+    fn initiate_error(&mut self, source: Object, error: Error) {
         // TODO: actually initiate the error
-        println!("{e}");
+        println!("{error}");
     }
 
     fn find(&self, key: &Object) -> crate::Result<Object> {
@@ -165,13 +170,16 @@ impl Interpreter {
                     self.operand_stack.push(obj);
                     self.clear_transaction();
                 },
-                Mode::Executable => match self.execute_object(obj) {
+                Mode::Executable => match self.execute_object(obj.clone()) {
                     Ok(_) => self.clear_transaction(),
-                    Err(e) => self.initiate_error(e),
+                    Err(e) => self.initiate_error(obj, e),
                 },
             },
             Err(e) => {
-                self.initiate_error(e);
+                self.initiate_error(
+                    Object::Operator((OperatorObject::Exec, Mode::Executable)),
+                    e,
+                );
             },
         };
 
