@@ -1,66 +1,71 @@
-use std::iter;
+use std::{
+    cell::RefCell,
+    io::{Read, Seek, SeekFrom},
+    rc::Rc,
+    string,
+};
 
 use crate::{
-    context::Context,
+    array::ArrayObject,
     encoding::{decode_ascii85, decode_hex},
-    object::{Access, ArrayObject, Mode, NameObject, Object, StringObject},
+    file::FileObject,
+    name::NameObject,
+    object::{Access, Mode, Object},
+    string::StringObject,
     Error, ErrorKind,
 };
 
-const FORM_FEED: char = '\x0C';
-const BACKSPACE: char = '\x08';
+const FORM_FEED: u8 = b'\x0C';
+const BACKSPACE: u8 = b'\x08';
 
-pub struct Lexer<I: Iterator<Item = char>> {
-    input: iter::Peekable<I>,
+pub(crate) struct Lexer {
+    input: FileObject,
 }
 
-impl<'a, I> Lexer<I>
-where
-    I: Iterator<Item = char>,
-{
-    pub fn new(input: I) -> Self {
-        Self {
-            input: input.peekable(),
-        }
-    }
+impl Iterator for Lexer {
+    type Item = crate::Result<Object>;
 
-    pub fn lex(&mut self, ctx: &'a mut Context) -> Option<crate::Result<Object>> {
+    fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.next_is_whitespace() {
-                self.input.next()?;
+                self.next_char()?;
                 continue;
             }
 
-            let ch = self.input.peek()?;
-
-            match ch {
-                '%' => {
-                    if let Err(e) = self.lex_comment() {
-                        return Some(Err(e));
-                    }
+            let ch = self.peek_char()?;
+            return match ch {
+                b'%' => match self.lex_comment() {
+                    Ok(_) => continue,
+                    Err(e) => Some(Err(e)),
                 },
-                '-' | '.' | '0'..='9' => {
-                    return Some(self.lex_numeric());
-                },
-                '(' => return Some(self.lex_string_literal(ctx)),
-                '<' => return Some(self.lex_gt(ctx)),
-                '{' => return Some(self.lex_procedure(ctx)),
+                b'-' | b'.' | b'0'..=b'9' => Some(self.lex_numeric()),
+                b'(' => Some(self.lex_string_literal()),
+                b'<' => Some(self.lex_gt()),
+                b'{' => Some(self.lex_procedure()),
                 _ => {
-                    let name = self.input.next()?.to_string();
-                    return Some(self.lex_name(name));
+                    let name = String::new();
+                    Some(self.lex_name(name))
                 },
             };
         }
     }
+}
+
+impl Lexer {
+    pub fn new<F: Into<FileObject>>(input: F) -> Self {
+        Self {
+            input: input.into(),
+        }
+    }
 
     fn lex_comment(&mut self) -> crate::Result<()> {
-        self.expect_char('%')?;
+        self.expect_char(b'%')?;
 
         loop {
-            match self.input.next() {
+            match self.next_char() {
                 None => break,
                 Some(ch) => match ch {
-                    '\n' | FORM_FEED => break,
+                    b'\n' | FORM_FEED => break,
                     _ => {},
                 },
             }
@@ -69,10 +74,10 @@ where
         Ok(())
     }
 
-    fn lex_gt(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
-        self.expect_char('<')?;
+    fn lex_gt(&mut self) -> crate::Result<Object> {
+        self.expect_char(b'<')?;
 
-        let Some(ch) = self.input.peek() else {
+        let Some(ch) = self.peek_char() else {
             return Err(Error::new(
                 ErrorKind::SyntaxError,
                 "unterminated hex string",
@@ -80,17 +85,17 @@ where
         };
 
         match ch {
-            '<' => {
-                let _ = self.input.next();
-                Ok(Object::Name(NameObject::new("<<", Mode::Executable)))
+            b'<' => {
+                let _ = self.next_char();
+                Ok(Object::Name(NameObject::from("<<")))
             },
-            '~' => self.lex_string_base85(ctx),
-            '0'..='9' | 'a'..='f' | 'A'..='F' => self.lex_string_hex(ctx),
+            b'~' => self.lex_string_base85(),
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => self.lex_string_hex(),
             _ => self.lex_name("<".to_string()),
         }
     }
 
-    fn lex_name(&mut self, mut name: String) -> crate::Result<Object> {
+    fn lex_name(&mut self, mut name: string::String) -> crate::Result<Object> {
         loop {
             if self.next_is_whitespace() {
                 break;
@@ -100,47 +105,47 @@ where
                 break;
             }
 
-            let first_ch = name.chars().nth(0).unwrap_or('\0');
+            let first_ch = name.as_bytes().first().copied().unwrap_or(b'\0');
 
             let lexing_delim =
                 name == "<<" || name == ">>" || (name.len() == 1 && is_delimiter(first_ch));
 
-            let lexing_literal = first_ch == '/';
+            let lexing_literal = first_ch == b'/';
 
             if self.next_is_regular() && lexing_delim && !lexing_literal {
                 break;
             }
 
-            match self.input.next() {
-                Some(ch) => name.push(ch),
+            match self.next_char() {
+                Some(ch) => name.push(ch as char),
                 None => break,
             }
         }
 
         if name.starts_with('/') {
             name.remove(0);
-            Ok(Object::Name(NameObject::new(name, Mode::Literal)))
+            Ok(Object::Name(NameObject::new(&name, Mode::Literal)))
         } else {
-            Ok(Object::Name(NameObject::new(name, Mode::Executable)))
+            Ok(Object::Name(NameObject::new(&name, Mode::Executable)))
         }
     }
 
     fn lex_numeric(&mut self) -> crate::Result<Object> {
-        let mut numeric = String::new();
+        let mut numeric = string::String::new();
 
         loop {
             if !self.next_is_regular() {
                 break;
             }
 
-            let Some(ch) = self.input.next() else {
+            let Some(ch) = self.next_char() else {
                 break;
             };
 
             match ch {
-                'e' | 'E' => numeric.push('E'),
+                b'e' | b'E' => numeric.push('E'),
                 _ => {
-                    numeric.push(ch);
+                    numeric.push(ch as char);
                 },
             }
         }
@@ -166,9 +171,9 @@ where
             let mut parts = numeric.split('E');
             return match (parts.next(), parts.next()) {
                 (Some(decimal), Some(exponent)) => {
-                    match (decimal.parse::<f64>(), exponent.parse::<i32>()) {
+                    match (decimal.parse::<f32>(), exponent.parse::<i32>()) {
                         (Ok(decimal), Ok(exponent)) => {
-                            let value = decimal * 10.0_f64.powi(exponent);
+                            let value = decimal * 10.0_f32.powi(exponent);
                             Ok(Object::Real(value))
                         },
                         _ => self.lex_name(numeric),
@@ -180,21 +185,21 @@ where
 
         match numeric.parse::<i32>() {
             Ok(i) => Ok(Object::Integer(i)),
-            Err(_) => match numeric.parse::<f64>() {
+            Err(_) => match numeric.parse::<f32>() {
                 Ok(r) => Ok(Object::Real(r)),
                 Err(_) => self.lex_name(numeric),
             },
         }
     }
 
-    fn lex_procedure(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
-        self.expect_char('{')?;
+    fn lex_procedure(&mut self) -> crate::Result<Object> {
+        self.expect_char(b'{')?;
 
         let mut objs = Vec::new();
 
         loop {
             let obj = self
-                .lex(ctx)
+                .next()
                 .ok_or(Error::new(ErrorKind::SyntaxError, "unterminated procedure"))??;
 
             if let Object::Name(ref n) = obj {
@@ -207,686 +212,198 @@ where
         }
 
         let arr = ArrayObject::new(objs, Access::ExecuteOnly, Mode::Executable);
-        let idx = ctx.mem_mut().insert(arr);
 
-        Ok(Object::Array(idx))
+        Ok(Object::Array(Rc::new(RefCell::new(arr))))
     }
 
-    fn lex_string_base85(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
-        let mut string = String::new();
+    fn lex_string_base85(&mut self) -> crate::Result<Object> {
+        let mut string = string::String::new();
 
         loop {
-            match self.input.next() {
+            match self.next_char() {
                 None => {
                     return Err(Error::new(
                         ErrorKind::SyntaxError,
                         "unterminated base85 string",
                     ))
                 },
-                Some('~') => match self.input.peek() {
+                Some(b'~') => match self.peek_char() {
                     None => {
                         return Err(Error::new(
                             ErrorKind::SyntaxError,
                             "unterminated base85 string",
                         ))
                     },
-                    Some('>') => break,
+                    Some(b'>') => break,
                     _ => continue,
                 },
-                Some(ch) => string.push(ch),
+                Some(ch) => string.push(ch as char),
             }
         }
 
-        let string: StringObject = decode_ascii85(&string)?.into();
-        let idx = ctx.mem_mut().insert(string);
+        let string = StringObject::new(decode_ascii85(&string)?, Mode::Literal);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Rc::new(RefCell::new(string))))
     }
 
-    fn lex_string_hex(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
+    fn lex_string_hex(&mut self) -> crate::Result<Object> {
         let mut string = String::new();
 
         loop {
             if self.next_is_whitespace() {
-                let _ = self.input.next();
+                let _ = self.next_char();
                 continue;
             }
 
-            let Some(ch) = self.input.next() else {
+            let Some(ch) = self.next_char() else {
                 return Err(Error::new(ErrorKind::SyntaxError, "unterminated string"));
             };
 
             match ch {
-                '>' => break,
-                '0'..='9' | 'a'..='z' | 'A'..='Z' => string.push(ch),
+                b'>' => break,
+                b'0'..=b'9' | b'a'..=b'z' | b'A'..=b'Z' => string.push(ch as char),
                 _ => return Err(Error::new(ErrorKind::SyntaxError, "invalid hex string")),
             }
         }
 
-        let string: StringObject = decode_hex(&string)?.into();
-        let idx = ctx.mem_mut().insert(string);
+        let string = StringObject::new(decode_hex(&string)?, Mode::Literal);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Rc::new(RefCell::new(string))))
     }
 
-    fn lex_string_literal(&mut self, ctx: &'a mut Context) -> crate::Result<Object> {
-        self.expect_char('(')?;
+    fn lex_string_literal(&mut self) -> crate::Result<Object> {
+        self.expect_char(b'(')?;
 
         let mut string = String::new();
         let mut active_parenthesis = 0;
 
         loop {
-            let Some(ch) = self.input.next() else {
+            let Some(ch) = self.next_char() else {
                 return Err(Error::new(ErrorKind::SyntaxError, "unterminated string"));
             };
 
             match ch {
-                '(' => {
-                    string.push(ch);
+                b'(' => {
+                    string.push('(');
                     active_parenthesis += 1;
                 },
-                ')' => {
+                b')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
-                    string.push(ch);
+                    string.push(')');
                     active_parenthesis -= 1;
                 },
-                '\\' => {
-                    let next_ch = match self.input.next() {
+                b'\\' => {
+                    let next_ch = match self.next_char() {
                         None => Err(Error::new(ErrorKind::IoError, "unexpected eof")),
                         Some(next_ch) => Ok(next_ch),
                     }?;
                     match next_ch {
-                        '\n' => continue,
-                        'r' => string.push('\r'),
-                        'n' => string.push('\n'),
-                        't' => string.push('\t'),
-                        'b' => string.push(BACKSPACE),
-                        'f' => string.push(FORM_FEED),
-                        '\\' => string.push('\\'),
-                        '(' => string.push('('),
-                        ')' => string.push(')'),
-                        '\r' => match self.input.peek() {
+                        b'\n' => continue,
+                        b'r' => string.push('\r'),
+                        b'n' => string.push('\n'),
+                        b't' => string.push('\t'),
+                        b'b' => string.push(BACKSPACE as char),
+                        b'f' => string.push(FORM_FEED as char),
+                        b'\\' => string.push('\\'),
+                        b'(' => string.push('('),
+                        b')' => string.push(')'),
+                        b'\r' => match self.peek_char() {
                             None => {
                                 return Err(Error::new(
                                     ErrorKind::SyntaxError,
                                     "unterminated string",
                                 ))
                             },
-                            Some('\n') => {
-                                let _ = self.input.next();
+                            Some(b'\n') => {
+                                let _ = self.next_char();
                             },
                             _ => {},
                         },
-                        '0'..='9' => {
-                            match (self.input.peek().cloned(), self.input.peek().cloned()) {
-                                (Some(second_digit), Some(third_digit)) => {
-                                    let octal =
-                                        String::from_iter([next_ch, second_digit, third_digit]);
+                        b'0'..=b'9' => {
+                            let mut octal: u8 = 0;
+                            octal |= next_ch << 6;
 
-                                    match u8::from_str_radix(&octal, 8) {
-                                        Err(_) => return Err(Error::from(ErrorKind::SyntaxError)),
-                                        Ok(value) => {
-                                            string.push(value.into());
-                                            let _ = self.input.next();
-                                            let _ = self.input.next();
-                                        },
-                                    }
-                                },
-                                _ => return Err(Error::from(ErrorKind::SyntaxError)),
+                            let ch1 = self.next_char();
+                            let ch2 = self.next_char();
+                            let _ = self.input.seek(SeekFrom::Current(-2));
+
+                            if let (Some(ch1), Some(ch2)) = (ch1, ch2) {
+                                octal |= ch1 << 3;
+                                octal |= ch2;
+                            } else {
+                                return Err(Error::new(
+                                    ErrorKind::SyntaxError,
+                                    "invalid octal number",
+                                ));
                             }
+
+                            string.push(octal.into());
                         },
-                        _ => string.push(next_ch),
+                        _ => string.push(next_ch as char),
                     }
                 },
-                _ => string.push(ch),
+                _ => string.push(ch as char),
             }
         }
 
-        let string: StringObject = string.into();
-        let idx = ctx.mem_mut().insert(string);
+        let string = StringObject::new(string, Mode::Literal);
 
-        Ok(Object::String(idx))
+        Ok(Object::String(Rc::new(RefCell::new(string))))
     }
 
-    fn expect_char(&mut self, ch: char) -> crate::Result<()> {
-        match self.input.next() {
+    fn expect_char(&mut self, ch: u8) -> crate::Result<()> {
+        match self.next_char() {
             Some(received) if ch == received => Ok(()),
             _ => Err(Error::new(ErrorKind::SyntaxError, format!("expected {ch}"))),
         }
     }
 
+    fn next_char(&mut self) -> Option<u8> {
+        let mut buf: [u8; 1] = [0];
+        match self.input.read(&mut buf) {
+            Ok(1) => Some(buf[0]),
+            _ => None,
+        }
+    }
+
+    fn peek_char(&mut self) -> Option<u8> {
+        if let Some(ch) = self.next_char() {
+            let _ = self.input.seek(SeekFrom::Current(-1));
+            return Some(ch);
+        }
+
+        None
+    }
+
     fn next_is_delimiter(&mut self) -> bool {
-        self.input.peek().is_some_and(|ch| is_delimiter(*ch))
+        self.peek_char().is_some_and(is_delimiter)
     }
 
     fn next_is_regular(&mut self) -> bool {
-        self.input.peek().is_some_and(|ch| is_regular(*ch))
+        self.peek_char().is_some_and(is_regular)
     }
 
     fn next_is_whitespace(&mut self) -> bool {
-        self.input.peek().is_some_and(|ch| is_whitespace(*ch))
+        self.peek_char().is_some_and(is_whitespace)
     }
 }
 
-fn is_delimiter(ch: char) -> bool {
+fn is_delimiter(ch: u8) -> bool {
     matches!(
         ch,
-        '<' | '>' | '(' | ')' | '[' | ']' | '{' | '}' | '/' | '%'
+        b'<' | b'>' | b'(' | b')' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
     )
 }
 
-fn is_regular(ch: char) -> bool {
+fn is_regular(ch: u8) -> bool {
     !is_delimiter(ch) && !is_whitespace(ch)
 }
 
-fn is_whitespace(ch: char) -> bool {
-    matches!(ch, '\0' | ' ' | '\t' | '\r' | '\n' | BACKSPACE | FORM_FEED)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    use std::error;
-
-    #[test]
-    fn test_lex_comment() -> Result<(), Box<dyn error::Error>> {
-        let mut lexer = Lexer::new("% this is a comment".chars());
-        let mut ctx = Context::default();
-        let obj = lexer.lex(&mut ctx);
-
-        assert!(obj.is_none());
-
-        let cases = [
-            ("10% this is a comment", Object::Integer(10)),
-            ("16#FFFE% this is a comment", Object::Integer(0xFFFE)),
-            ("1.0% this is a comment", Object::Real(1.0)),
-            ("1.0e7% this is a comment", Object::Real(1.0e7)),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-
-            let obj = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert_eq!(expect, obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_bad_numeric() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["1x0", "1.x0"];
-
-        for input in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(input.into()), name);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_numeric() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("1", Object::Integer(1)),
-            ("-1", Object::Integer(-1)),
-            ("1234567890", Object::Integer(1234567890)),
-            ("2147483648", Object::Real(2147483648.0)),
-            (".1", Object::Real(0.1)),
-            ("-.1", Object::Real(-0.1)),
-            ("1.234567890", Object::Real(1.234567890)),
-            ("1.2E7", Object::Real(1.2e7)),
-            ("1.2e7", Object::Real(1.2e7)),
-            ("-1.2e7", Object::Real(-1.2e7)),
-            ("1.2e-7", Object::Real(1.2e-7)),
-            ("-1.2e-7", Object::Real(-1.2e-7)),
-            ("2#1000", Object::Integer(0b1000)),
-            ("8#1777", Object::Integer(0o1777)),
-            ("16#fffe", Object::Integer(0xFFFE)),
-            ("16#FFFE", Object::Integer(0xFFFE)),
-            ("16#ffFE", Object::Integer(0xFFFE)),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let obj = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert_eq!(expect, obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_bad_string() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["(this is a string", "(this is a string\\)"];
-
-        for input in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let result = lexer.lex(&mut ctx).ok_or("expected object")?;
-
-            assert!(result.is_err());
-            assert_eq!(ErrorKind::SyntaxError, result.unwrap_err().kind());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("(this is a string)", "this is a string"),
-            (
-                "(this is a multiline\nstring)",
-                "this is a multiline\nstring",
-            ),
-            (
-                "(this is a multiline\r\nstring)",
-                "this is a multiline\r\nstring",
-            ),
-            (
-                "(this has (nested) parenthesis)",
-                "this has (nested) parenthesis",
-            ),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &StringObject = ctx
-                .mem()
-                .get(str_idx)
-                .ok_or("expected object")?
-                .try_into()?;
-
-            assert_eq!(string, expect);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_escaped_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("()", ""),
-            ("(\\n)", "\n"),
-            ("(\\r)", "\r"),
-            ("(\\t)", "\t"),
-            ("(\\b)", "\x08"),
-            ("(\\f)", "\x0C"),
-            ("(\\\\)", "\\"),
-            ("(\\()", "("),
-            ("(\\))", ")"),
-            ("(\\\n)", ""),
-            ("(\\\r)", ""),
-            ("(\\\r\n)", ""),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &StringObject = ctx
-                .mem()
-                .get(str_idx)
-                .ok_or("expected object")?
-                .try_into()?;
-
-            assert_eq!(string, expect);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_ignore_escaped_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "(\\ii)";
-        let mut lexer = Lexer::new(input.chars());
-        let mut ctx = Context::default();
-
-        let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-            return Err("expected string object".into());
-        };
-
-        let string: &StringObject = ctx
-            .mem()
-            .get(str_idx)
-            .ok_or("expected object")?
-            .try_into()?;
-
-        assert_eq!(string, "ii");
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_octal_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [("(\\000)", "\0"), ("(\\377)", "ÿ")];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &StringObject = ctx
-                .mem()
-                .get(str_idx)
-                .ok_or("expected object")?
-                .try_into()?;
-
-            assert_eq!(string, expect);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_hex_string() -> Result<(), Box<dyn error::Error>> {
-        let cases = [
-            ("<736F6D65>", "some"),
-            ("<736f6d65>", "some"),
-            ("<736f6D65>", "some"),
-            ("<73 6F 6D 65>", "some"),
-            ("<70756D7>", "pump"),
-            ("<70756D70>", "pump"),
-        ];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &StringObject = ctx
-                .mem()
-                .get(str_idx)
-                .ok_or("expected object")?
-                .try_into()?;
-
-            assert_eq!(string, expect);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_base85_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "<~FD,B0+DGm>F)Po,+EV1>F8~>";
-        let expect = "this is some text";
-        let mut lexer = Lexer::new(input.chars());
-        let mut ctx = Context::default();
-
-        let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-            return Err("expected string object".into());
-        };
-
-        let string: &StringObject = ctx
-            .mem()
-            .get(str_idx)
-            .ok_or("expected object")?
-            .try_into()?;
-
-        assert_eq!(string, expect);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_multiple_string() -> Result<(), Box<dyn error::Error>> {
-        let input = "(this is a literal string) <7468697320697320612068657820737472696E67> <~FD,B0+DGm>@3B#fF(I<g+EMXFBl7P~>";
-        let expect = [
-            "this is a literal string",
-            "this is a hex string",
-            "this is a base85 string",
-        ];
-
-        let mut lexer = Lexer::new(input.chars());
-        let mut ctx = Context::default();
-
-        for e in expect {
-            let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected string object".into());
-            };
-
-            let string: &StringObject = ctx
-                .mem()
-                .get(str_idx)
-                .ok_or("expected object")?
-                .try_into()?;
-
-            assert_eq!(string, e);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_name() -> Result<(), Box<dyn error::Error>> {
-        let inputs = [
-            "abc",
-            "Offset",
-            "$$",
-            "23A",
-            "13-456",
-            "a.b",
-            "$MyDict",
-            "@pattern",
-            "16#FFFF.LMAO",
-        ];
-
-        for input in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(input.into()), name);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_procedure() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["{}", "{ }", "{ { } }"];
-
-        for input in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let obj = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert!(matches!(obj, Object::Array(_)));
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_procedure_nested() -> Result<(), Box<dyn error::Error>> {
-        let inputs = ["{ { 1 } }", "{{1}}"];
-
-        for input in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            let Some(Ok(Object::Array(outer_idx))) = lexer.lex(&mut ctx) else {
-                return Err("expected procedure object".into());
-            };
-
-            let outer: &ArrayObject = ctx
-                .mem()
-                .get(outer_idx)
-                .ok_or("expected composite")?
-                .try_into()?;
-            assert!(outer.access().is_exec_only());
-            assert_eq!(1, outer.len());
-
-            let Some(Object::Array(inner_idx)) = outer.clone().into_iter().next() else {
-                return Err("expected procedure object".into());
-            };
-
-            let inner: &ArrayObject = ctx
-                .mem()
-                .get(inner_idx)
-                .ok_or("expected composite")?
-                .try_into()?;
-            assert!(inner.access().is_exec_only());
-            assert_eq!(1, inner.len());
-            assert_eq!(Some(Object::Integer(1)), inner.clone().into_iter().next());
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_self_deliminating() -> Result<(), Box<dyn error::Error>> {
-        let inputs = [
-            ("mid[dle", "["),
-            ("mid]dle", "]"),
-            ("mid<<dle", "<<"),
-            ("mid>>dle", ">>"),
-            ("mid/dle", "dle"),
-            ("1[2", "["),
-            ("1]2", "]"),
-            ("1<<2", "<<"),
-            ("1>>2", ">>"),
-            ("1/2", "2"),
-            ("1.2[3", "["),
-            ("1.2]3", "]"),
-            ("1.2<<3", "<<"),
-            ("1.2>>3", ">>"),
-            ("1.2/3", "3"),
-            ("16#FF[FF", "["),
-            ("16#FF]FF", "]"),
-            ("16#FF<<FF", "<<"),
-            ("16#FF>>FF", ">>"),
-            ("16#FF/FF", "FF"),
-        ];
-
-        for (input, expect) in inputs {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-            let _ = lexer.lex(&mut ctx);
-
-            let obj = lexer.lex(&mut ctx).ok_or("expected object")??;
-
-            assert_eq!(Object::Name(expect.into()), obj);
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_self_deliminating_pair() -> Result<(), Box<dyn error::Error>> {
-        let cases = [("[[", "["), ("]]", "]"), ("<<<<", "<<"), (">>>>", ">>")];
-
-        for (input, expect) in cases {
-            let mut lexer = Lexer::new(input.chars());
-            let mut ctx = Context::default();
-
-            while let Some(obj) = lexer.lex(&mut ctx) {
-                assert_eq!(Object::Name(expect.into()), obj?);
-            }
-        }
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_lex_all() -> Result<(), Box<dyn error::Error>> {
-        let input = "
-myStr (i have a string right here)
-myOtherStr (and
-another \
-right \
-here)
-% this is a comment
-myInt 1234567890
-myNegativeInt -1234567890
-myReal 3.1456
-myNegativeReal -3.1456
-        ";
-
-        let mut lexer = Lexer::new(input.chars());
-        let mut ctx = Context::default();
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myStr".into()), name);
-
-        let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-            return Err("expected string object".into());
-        };
-        let string: &StringObject = ctx
-            .mem()
-            .get(str_idx)
-            .ok_or("expected composite")?
-            .try_into()?;
-        assert_eq!(string, "i have a string right here");
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myOtherStr".into()), name);
-
-        let Some(Ok(Object::String(str_idx))) = lexer.lex(&mut ctx) else {
-            return Err("expected string object".into());
-        };
-        let string: &StringObject = ctx
-            .mem()
-            .get(str_idx)
-            .ok_or("expected object")?
-            .try_into()?;
-        assert_eq!(string, "and\nanother right here");
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myInt".into()), name);
-
-        let integer = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Integer(1234567890), integer);
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeInt".into()), name);
-
-        let integer = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Integer(-1234567890), integer);
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myReal".into()), name);
-
-        let real = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Real(3.1456), real);
-
-        let name = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Name("myNegativeReal".into()), name);
-
-        let real = lexer.lex(&mut ctx).ok_or("expected object")??;
-        assert_eq!(Object::Real(-3.1456), real);
-
-        Ok(())
-    }
+fn is_whitespace(ch: u8) -> bool {
+    matches!(
+        ch,
+        b'\0' | b' ' | b'\t' | b'\r' | b'\n' | BACKSPACE | FORM_FEED
+    )
 }
