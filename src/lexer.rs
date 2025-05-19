@@ -45,7 +45,7 @@ impl Iterator for Lexer {
                 _ => {
                     let name = String::new();
                     Some(self.lex_name(name))
-                }
+                },
             };
         }
     }
@@ -66,7 +66,7 @@ impl Lexer {
                 None => break,
                 Some(ch) => match ch {
                     b'\n' | FORM_FEED => break,
-                    _ => {}
+                    _ => {},
                 },
             }
         }
@@ -88,7 +88,7 @@ impl Lexer {
             b'<' => {
                 let _ = self.next_char();
                 Ok(Object::Name(NameObject::from("<<")))
-            }
+            },
             b'~' => self.lex_string_base85(),
             b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => self.lex_string_hex(),
             _ => self.lex_name("<".to_string()),
@@ -105,7 +105,7 @@ impl Lexer {
                 break;
             }
 
-            let first_ch = name.bytes().nth(0).unwrap_or(b'\0');
+            let first_ch = name.as_bytes().first().copied().unwrap_or(b'\0');
 
             let lexing_delim =
                 name == "<<" || name == ">>" || (name.len() == 1 && is_delimiter(first_ch));
@@ -146,7 +146,7 @@ impl Lexer {
                 b'e' | b'E' => numeric.push('E'),
                 _ => {
                     numeric.push(ch as char);
-                }
+                },
             }
         }
 
@@ -175,10 +175,10 @@ impl Lexer {
                         (Ok(decimal), Ok(exponent)) => {
                             let value = decimal * 10.0_f32.powi(exponent);
                             Ok(Object::Real(value))
-                        }
+                        },
                         _ => self.lex_name(numeric),
                     }
-                }
+                },
                 _ => self.lex_name(numeric),
             };
         }
@@ -226,14 +226,14 @@ impl Lexer {
                         ErrorKind::SyntaxError,
                         "unterminated base85 string",
                     ))
-                }
+                },
                 Some(b'~') => match self.peek_char() {
                     None => {
                         return Err(Error::new(
                             ErrorKind::SyntaxError,
                             "unterminated base85 string",
                         ))
-                    }
+                    },
                     Some(b'>') => break,
                     _ => continue,
                 },
@@ -286,14 +286,14 @@ impl Lexer {
                 b'(' => {
                     string.push('(');
                     active_parenthesis += 1;
-                }
+                },
                 b')' => {
                     if active_parenthesis < 1 {
                         break;
                     }
                     string.push(')');
                     active_parenthesis -= 1;
-                }
+                },
                 b'\\' => {
                     let next_ch = match self.next_char() {
                         None => Err(Error::new(ErrorKind::IoError, "unexpected eof")),
@@ -315,11 +315,11 @@ impl Lexer {
                                     ErrorKind::SyntaxError,
                                     "unterminated string",
                                 ))
-                            }
+                            },
                             Some(b'\n') => {
                                 let _ = self.next_char();
-                            }
-                            _ => {}
+                            },
+                            _ => {},
                         },
                         b'0'..=b'9' => {
                             let mut octal: u8 = 0;
@@ -340,10 +340,10 @@ impl Lexer {
                             }
 
                             string.push(octal.into());
-                        }
+                        },
                         _ => string.push(next_ch as char),
                     }
-                }
+                },
                 _ => string.push(ch as char),
             }
         }
@@ -378,15 +378,15 @@ impl Lexer {
     }
 
     fn next_is_delimiter(&mut self) -> bool {
-        self.peek_char().is_some_and(|ch| is_delimiter(ch))
+        self.peek_char().is_some_and(is_delimiter)
     }
 
     fn next_is_regular(&mut self) -> bool {
-        self.peek_char().is_some_and(|ch| is_regular(ch))
+        self.peek_char().is_some_and(is_regular)
     }
 
     fn next_is_whitespace(&mut self) -> bool {
-        self.peek_char().is_some_and(|ch| is_whitespace(ch))
+        self.peek_char().is_some_and(is_whitespace)
     }
 }
 

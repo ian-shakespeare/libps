@@ -44,7 +44,7 @@ impl io::Seek for FileObject {
                 self.cursor = index;
 
                 Ok(self.cursor as u64)
-            }
+            },
             io::SeekFrom::End(offset) => {
                 let index = self
                     .inner
@@ -58,17 +58,17 @@ impl io::Seek for FileObject {
                 self.cursor = index;
 
                 Ok(self.cursor as u64)
-            }
+            },
             io::SeekFrom::Start(offset) => {
                 let index = offset as usize;
 
                 if index >= self.inner.len() {
                     return Err(io::Error::from(io::ErrorKind::NotSeekable));
                 }
-                self.cursor = index as usize;
+                self.cursor = index;
 
                 Ok(offset)
-            }
+            },
         }
     }
 }

@@ -109,20 +109,20 @@ impl hash::Hash for Object {
             Object::Real(r) => {
                 let u = r.to_bits();
                 u.hash(state);
-            }
+            },
             Object::Array(a) => {
                 for obj in a.borrow().iter() {
                     obj.hash(state);
                 }
-            }
+            },
             Object::Dictionary(d) => {
                 for (key, value) in d.borrow().iter() {
                     key.hash(state);
                     value.hash(state);
                 }
-            }
+            },
             Object::String(s) => s.borrow().hash(state),
-            _ => {}
+            _ => {},
         };
     }
 }

@@ -53,6 +53,6 @@ impl PartialEq for NameObject {
 
 impl PartialEq<str> for NameObject {
     fn eq(&self, other: &str) -> bool {
-        self.to_string() == other
+        self.inner == other.as_bytes()
     }
 }

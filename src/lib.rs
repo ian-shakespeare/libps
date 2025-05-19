@@ -36,7 +36,7 @@ pub struct Interpreter {
 
 impl Interpreter {
     pub fn new(stdout: StdoutLock<'static>) -> Self {
-        let mut system_dict = DictionaryObject::new();
+        let mut system_dict = DictionaryObject::default();
         system_dict.insert(
             Object::String(Rc::new(RefCell::new("flush".into()))),
             Object::Operator((OperatorObject::Flush, Mode::Executable)),
@@ -50,8 +50,7 @@ impl Interpreter {
             Object::Operator((OperatorObject::Quit, Mode::Executable)),
         );
 
-        let mut dict_stack = Vec::new();
-        dict_stack.push(Rc::new(RefCell::new(system_dict)));
+        let dict_stack = vec![Rc::new(RefCell::new(system_dict))];
 
         Self {
             operand_stack: Vec::new(),
@@ -77,7 +76,7 @@ impl Interpreter {
                 let def = self.find(&Object::Name(name))?;
                 self.operand_stack.push(def.clone());
                 self.exec()
-            }
+            },
             Object::Operator((operator, _)) => match operator {
                 OperatorObject::Flush => self.flush(),
                 OperatorObject::Print => self.print(),
@@ -92,7 +91,7 @@ impl Interpreter {
                 }
 
                 Ok(())
-            }
+            },
             Object::File(file) => {
                 let lexer = Lexer::new(file.borrow().clone());
 
@@ -102,7 +101,7 @@ impl Interpreter {
                 }
 
                 Ok(())
-            }
+            },
             Object::String(string) => {
                 let value: Vec<u8> = string.borrow().value().into();
                 let lexer = Lexer::new(FileObject::from(value));
@@ -113,7 +112,7 @@ impl Interpreter {
                 }
 
                 Ok(())
-            }
+            },
             _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
         }
     }
@@ -165,7 +164,7 @@ impl Interpreter {
                 Mode::Literal => {
                     self.operand_stack.push(obj);
                     self.clear_transaction();
-                }
+                },
                 Mode::Executable => match self.execute_object(obj) {
                     Ok(_) => self.clear_transaction(),
                     Err(e) => self.initiate_error(e),
@@ -173,7 +172,7 @@ impl Interpreter {
             },
             Err(e) => {
                 self.initiate_error(e);
-            }
+            },
         };
 
         Ok(())
@@ -186,7 +185,8 @@ impl Interpreter {
     pub fn print(&mut self) -> crate::Result<()> {
         let s = self.pop_string()?;
 
-        self.stdout
+        let _ = self
+            .stdout
             .write(s.borrow().value())
             .or(Err(Error::from(ErrorKind::IoError)))?;
 

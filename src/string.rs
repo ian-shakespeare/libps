@@ -52,9 +52,9 @@ impl From<String> for StringObject {
     }
 }
 
-impl Into<Vec<u8>> for StringObject {
-    fn into(self) -> Vec<u8> {
-        self.inner
+impl From<StringObject> for Vec<u8> {
+    fn from(value: StringObject) -> Self {
+        value.inner
     }
 }
 

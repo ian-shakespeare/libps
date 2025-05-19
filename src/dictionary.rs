@@ -2,20 +2,13 @@ use std::{collections::HashMap, fmt};
 
 use crate::{Mode, Object};
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct DictionaryObject {
     inner: HashMap<Object, Object>,
     mode: Mode,
 }
 
 impl DictionaryObject {
-    pub fn new() -> Self {
-        Self {
-            inner: HashMap::new(),
-            mode: Mode::default(),
-        }
-    }
-
     pub fn insert(&mut self, k: Object, v: Object) -> Option<Object> {
         self.inner.insert(k, v)
     }
