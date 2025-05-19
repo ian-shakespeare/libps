@@ -1,0 +1,25 @@
+% test index
+
+(a) (b) (c) (d) 0 index
+(d) assertdeepeq
+clear
+
+(a) (b) (c) (d) 3 index
+(a) assertdeepeq
+clear
+
+(a) (b) (c) 4 index
+/rangecheck asserterror
+handleerror clear
+
+(a) (b) (c) -1 index
+/rangecheck asserterror
+handleerror clear
+
+(a) (b) (c) 1.5 index
+/typecheck asserterror
+handleerror clear
+
+index
+/stackunderflow asserterror
+handleerror clear

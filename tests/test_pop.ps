@@ -1,0 +1,11 @@
+% test pop
+
+1 2 3 pop
+count 2 asserteq
+/received 2 array def
+received astore
+[ 1 2 ] received assertdeepeq
+clear
+
+pop
+/stackunderflow asserterror

@@ -1,0 +1,15 @@
+% test idiv
+
+<</integertype true>> begin
+
+3 2 idiv dup
+type assert
+1 asserteq
+
+4 2 idiv dup
+type assert
+2 asserteq
+
+-5 2 idiv dup
+type assert
+-2 asserteq

@@ -1,0 +1,10 @@
+% test exch
+
+1 2 exch
+1 asserteq
+2 asserteq
+clear
+
+2 exch
+/stackunderflow asserterror
+clear
