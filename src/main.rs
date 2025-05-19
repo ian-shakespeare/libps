@@ -1,43 +1,26 @@
-use std::{
-    io::{self, BufRead, Write},
-    process,
-};
+use std::io::{self, BufRead, Write};
 
-use libps::Interpreter;
-
-fn fatal(message: &str) -> ! {
-    eprintln!("{}", message);
-
-    process::exit(1)
-}
+use libps::{FileObject, Interpreter};
 
 fn main() -> io::Result<()> {
     let mut input = io::stdin().lock();
     let mut output = io::stdout().lock();
-    let mut buf = String::new();
-    let mut interpreter = Interpreter::default();
 
-    output.write_all(b"libPS 0.0.0")?;
+    output.write_all(b"libPS 0.0.0\n")?;
+    let mut interpreter = Interpreter::new(output);
 
     loop {
-        output.write_all(b"\n>>> ")?;
-        output.flush()?;
+        interpreter.push_string(">>> ".into());
+        let _ = interpreter.print(); // TODO: handle this
+        let _ = interpreter.flush();
 
+        let mut buf = String::new();
         input.read_line(&mut buf)?;
 
-        if buf.starts_with(".quit") {
-            break;
+        interpreter.push_file(FileObject::from(buf));
+
+        if let Err(e) = interpreter.exec() {
+            panic!("{}", e.to_string());
         }
-
-        if let Err(e) = interpreter.evaluate(buf.chars().into()) {
-            fatal(&e.to_string());
-        }
-
-        output.write_all(b"|-")?;
-        interpreter.write_stack(&mut output)?;
-
-        buf.clear();
     }
-
-    Ok(())
 }
