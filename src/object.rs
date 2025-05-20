@@ -51,14 +51,26 @@ impl Object {
 
     pub fn mode(&self) -> Mode {
         match self {
-            Object::Name(name) => name.mode(),
+            Object::Name(name) => name.mode,
             Object::Null(mode) => *mode,
             Object::Operator((_, mode)) => *mode,
-            Object::Array(array) => array.borrow().mode(),
-            Object::File(file) => file.borrow().mode(),
-            Object::String(string) => string.borrow().mode(),
+            Object::Array(array) => array.borrow().mode,
+            Object::File(file) => file.borrow().mode,
+            Object::String(string) => string.borrow().mode,
             _ => Mode::Literal,
         }
+    }
+
+    pub fn set_mode(&mut self, mode: Mode) {
+        match self {
+            Object::Name(name) => name.mode = mode,
+            Object::Null(current) => *current = mode,
+            Object::Operator((_, current)) => *current = mode,
+            Object::Array(array) => array.borrow_mut().mode = mode,
+            Object::File(file) => file.borrow_mut().mode = mode,
+            Object::String(string) => string.borrow_mut().mode = mode,
+            _ => (),
+        };
     }
 }
 

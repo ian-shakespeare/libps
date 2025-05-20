@@ -5,7 +5,7 @@ use crate::object::Mode;
 #[derive(Clone, Debug)]
 pub struct NameObject {
     inner: Vec<u8>,
-    mode: Mode,
+    pub mode: Mode,
 }
 
 impl NameObject {
@@ -14,10 +14,6 @@ impl NameObject {
             inner: value.bytes().collect(),
             mode,
         }
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
     }
 
     pub fn value(&self) -> &[u8] {

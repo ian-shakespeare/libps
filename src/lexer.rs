@@ -34,9 +34,11 @@ impl Iterator for Lexer {
 
             let ch = self.peek_char()?;
             return match ch {
-                b'%' => match self.lex_comment() {
-                    Ok(_) => continue,
-                    Err(e) => Some(Err(e)),
+                b'%' => {
+                    match self.lex_comment() {
+                        Ok(_) => continue,
+                        Err(e) => Some(Err(e)),
+                    }
                 },
                 b'-' | b'.' | b'0'..=b'9' => Some(self.lex_numeric()),
                 b'(' => Some(self.lex_string_literal()),
@@ -64,9 +66,11 @@ impl Lexer {
         loop {
             match self.next_char() {
                 None => break,
-                Some(ch) => match ch {
-                    b'\n' | FORM_FEED => break,
-                    _ => {},
+                Some(ch) => {
+                    match ch {
+                        b'\n' | FORM_FEED => break,
+                        _ => {},
+                    }
                 },
             }
         }
@@ -156,12 +160,16 @@ impl Lexer {
         if is_radix {
             let mut parts = numeric.split('#');
             return match (parts.next(), parts.next()) {
-                (Some(base), Some(digits)) => match base.parse::<u32>() {
-                    Ok(base) => match i32::from_str_radix(digits, base) {
-                        Ok(value) => Ok(Object::Integer(value)),
+                (Some(base), Some(digits)) => {
+                    match base.parse::<u32>() {
+                        Ok(base) => {
+                            match i32::from_str_radix(digits, base) {
+                                Ok(value) => Ok(Object::Integer(value)),
+                                Err(_) => self.lex_name(numeric),
+                            }
+                        },
                         Err(_) => self.lex_name(numeric),
-                    },
-                    Err(_) => self.lex_name(numeric),
+                    }
                 },
                 _ => self.lex_name(numeric),
             };
@@ -185,9 +193,11 @@ impl Lexer {
 
         match numeric.parse::<i32>() {
             Ok(i) => Ok(Object::Integer(i)),
-            Err(_) => match numeric.parse::<f32>() {
-                Ok(r) => Ok(Object::Real(r)),
-                Err(_) => self.lex_name(numeric),
+            Err(_) => {
+                match numeric.parse::<f32>() {
+                    Ok(r) => Ok(Object::Real(r)),
+                    Err(_) => self.lex_name(numeric),
+                }
             },
         }
     }
@@ -227,21 +237,23 @@ impl Lexer {
                         "unterminated base85 string",
                     ))
                 },
-                Some(b'~') => match self.peek_char() {
-                    None => {
-                        return Err(Error::new(
-                            ErrorKind::SyntaxError,
-                            "unterminated base85 string",
-                        ))
-                    },
-                    Some(b'>') => break,
-                    _ => continue,
+                Some(b'~') => {
+                    match self.peek_char() {
+                        None => {
+                            return Err(Error::new(
+                                ErrorKind::SyntaxError,
+                                "unterminated base85 string",
+                            ))
+                        },
+                        Some(b'>') => break,
+                        _ => continue,
+                    }
                 },
                 Some(ch) => string.push(ch as char),
             }
         }
 
-        let string = StringObject::new(decode_ascii85(&string)?, Mode::Literal);
+        let string = StringObject::new(decode_ascii85(&string)?, Access::Unlimited, Mode::Literal);
 
         Ok(Object::String(Rc::new(RefCell::new(string))))
     }
@@ -266,7 +278,7 @@ impl Lexer {
             }
         }
 
-        let string = StringObject::new(decode_hex(&string)?, Mode::Literal);
+        let string = StringObject::new(decode_hex(&string)?, Access::Unlimited, Mode::Literal);
 
         Ok(Object::String(Rc::new(RefCell::new(string))))
     }
@@ -309,17 +321,19 @@ impl Lexer {
                         b'\\' => string.push('\\'),
                         b'(' => string.push('('),
                         b')' => string.push(')'),
-                        b'\r' => match self.peek_char() {
-                            None => {
-                                return Err(Error::new(
-                                    ErrorKind::SyntaxError,
-                                    "unterminated string",
-                                ))
-                            },
-                            Some(b'\n') => {
-                                let _ = self.next_char();
-                            },
-                            _ => {},
+                        b'\r' => {
+                            match self.peek_char() {
+                                None => {
+                                    return Err(Error::new(
+                                        ErrorKind::SyntaxError,
+                                        "unterminated string",
+                                    ))
+                                },
+                                Some(b'\n') => {
+                                    let _ = self.next_char();
+                                },
+                                _ => {},
+                            }
                         },
                         b'0'..=b'9' => {
                             let mut octal: u8 = 0;
@@ -348,7 +362,7 @@ impl Lexer {
             }
         }
 
-        let string = StringObject::new(string, Mode::Literal);
+        let string = StringObject::new(string, Access::Unlimited, Mode::Literal);
 
         Ok(Object::String(Rc::new(RefCell::new(string))))
     }

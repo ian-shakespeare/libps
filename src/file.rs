@@ -6,13 +6,7 @@ use crate::object::Mode;
 pub struct FileObject {
     cursor: usize,
     inner: Vec<u8>,
-    mode: Mode,
-}
-
-impl FileObject {
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
+    pub(crate) mode: Mode,
 }
 
 impl io::Read for FileObject {

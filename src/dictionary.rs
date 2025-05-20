@@ -5,7 +5,7 @@ use crate::{Mode, Object};
 #[derive(Debug, Default)]
 pub struct DictionaryObject {
     inner: HashMap<Object, Object>,
-    mode: Mode,
+    pub(crate) mode: Mode,
 }
 
 impl DictionaryObject {

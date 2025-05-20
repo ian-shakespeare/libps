@@ -1,23 +1,25 @@
 use std::{fmt, hash, str};
 
-use crate::object::Mode;
+use crate::object::{Access, Mode};
 
 #[derive(Debug)]
 pub struct StringObject {
+    access: Access,
     inner: Vec<u8>,
-    mode: Mode,
+    pub(crate) mode: Mode,
 }
 
 impl StringObject {
-    pub fn new<S: Into<String>>(value: S, mode: Mode) -> Self {
+    pub fn new<S: Into<String>>(value: S, access: Access, mode: Mode) -> Self {
         Self {
             inner: value.into().bytes().collect(),
+            access,
             mode,
         }
     }
 
-    pub fn mode(&self) -> Mode {
-        self.mode
+    pub fn access(&self) -> Access {
+        self.access
     }
 
     pub fn value(&self) -> &[u8] {
@@ -37,6 +39,7 @@ impl fmt::Display for StringObject {
 impl From<&str> for StringObject {
     fn from(value: &str) -> Self {
         Self {
+            access: Access::default(),
             inner: value.bytes().collect(),
             mode: Mode::default(),
         }
@@ -46,6 +49,7 @@ impl From<&str> for StringObject {
 impl From<String> for StringObject {
     fn from(value: String) -> Self {
         Self {
+            access: Access::default(),
             inner: value.bytes().collect(),
             mode: Mode::default(),
         }

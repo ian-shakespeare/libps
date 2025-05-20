@@ -6,7 +6,7 @@ use crate::object::{Access, Mode, Object};
 pub struct ArrayObject {
     access: Access,
     inner: Vec<Object>,
-    mode: Mode,
+    pub(crate) mode: Mode,
 }
 
 impl ArrayObject {
@@ -29,15 +29,11 @@ impl ArrayObject {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
 }
 
 impl fmt::Display for ArrayObject {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (l_delim, r_delim) = match self.mode() {
+        let (l_delim, r_delim) = match self.mode {
             Mode::Executable => ("{ ", "}"),
             Mode::Literal => ("[ ", "]"),
         };
