@@ -22,6 +22,7 @@ mod encoding;
 mod error;
 mod file;
 mod lexer;
+mod map;
 mod name;
 mod object;
 mod operator;

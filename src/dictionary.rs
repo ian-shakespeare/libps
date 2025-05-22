@@ -1,10 +1,10 @@
-use std::{collections::HashMap, fmt};
+use std::fmt;
 
-use crate::{Mode, Object};
+use crate::{map::Map, Mode, Object};
 
 #[derive(Debug, Default)]
 pub struct DictionaryObject {
-    inner: HashMap<Object, Object>,
+    inner: Map<Object, Object>,
     pub(crate) mode: Mode,
 }
 
@@ -13,7 +13,7 @@ impl DictionaryObject {
         self.inner.insert(k, v)
     }
 
-    pub fn iter(&self) -> std::collections::hash_map::Iter<'_, Object, Object> {
+    pub fn iter(&self) -> impl Iterator<Item = (&Object, &Object)> {
         self.inner.iter()
     }
 
