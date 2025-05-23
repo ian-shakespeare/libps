@@ -1,10 +1,10 @@
 use std::fmt;
 
-use crate::{map::Map, Mode, Object};
+use crate::{map::HashMap, Mode, Object};
 
 #[derive(Debug, Default)]
 pub struct DictionaryObject {
-    inner: Map<Object, Object>,
+    inner: HashMap<Object, Object>,
     pub(crate) mode: Mode,
 }
 
