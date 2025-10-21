@@ -23,6 +23,7 @@ mod error;
 mod file;
 mod lexer;
 mod map;
+mod memory;
 mod name;
 mod object;
 mod operator;
