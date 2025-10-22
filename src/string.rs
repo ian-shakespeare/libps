@@ -5,8 +5,8 @@ use crate::object::{Access, Mode};
 #[derive(Debug)]
 pub struct StringObject {
     access: Access,
-    inner: Vec<u8>,
     pub(crate) mode: Mode,
+    inner: Vec<u8>,
 }
 
 impl StringObject {
@@ -53,6 +53,14 @@ impl From<String> for StringObject {
             inner: value.bytes().collect(),
             mode: Mode::default(),
         }
+    }
+}
+
+impl TryFrom<Vec<u8>> for StringObject {
+    type Error = &'static str;
+
+    fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+        Err("not implemented")
     }
 }
 

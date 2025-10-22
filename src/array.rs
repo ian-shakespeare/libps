@@ -1,8 +1,8 @@
-use std::{fmt, slice};
+use std::slice;
 
 use crate::object::{Access, Mode, Object};
 
-#[derive(Debug)]
+// max capacity: 65535 (u16)
 pub struct ArrayObject {
     access: Access,
     inner: Vec<Object>,
@@ -31,20 +31,8 @@ impl ArrayObject {
     }
 }
 
-impl fmt::Display for ArrayObject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let (l_delim, r_delim) = match self.mode {
-            Mode::Executable => ("{ ", "}"),
-            Mode::Literal => ("[ ", "]"),
-        };
-
-        l_delim.fmt(f)?;
-        for obj in self.iter() {
-            obj.fmt(f)?;
-            " ".fmt(f)?;
-        }
-        r_delim.fmt(f)?;
-
-        Ok(())
+impl From<ArrayObject> for Vec<u8> {
+    fn from(value: ArrayObject) -> Self {
+        todo!()
     }
 }
