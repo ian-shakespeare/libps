@@ -29,9 +29,9 @@ impl fmt::Display for NameObject {
     }
 }
 
-impl<'a> From<&'a str> for NameObject {
-    fn from(value: &'a str) -> Self {
-        Self::new(value, Mode::default())
+impl<S: AsRef<str>> From<S> for NameObject {
+    fn from(value: S) -> Self {
+        Self::new(value.as_ref(), Mode::default())
     }
 }
 

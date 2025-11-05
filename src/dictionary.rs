@@ -1,11 +1,10 @@
-use std::fmt;
+use std::collections::HashMap;
 
-use crate::{map::HashMap, Mode, Object};
+use crate::Object;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Default)]
 pub struct DictionaryObject {
     inner: HashMap<Object, Object>,
-    pub(crate) mode: Mode,
 }
 
 impl DictionaryObject {
@@ -19,24 +18,5 @@ impl DictionaryObject {
 
     pub fn get(&self, k: &Object) -> Option<&Object> {
         self.inner.get(k)
-    }
-
-    pub fn mode(&self) -> Mode {
-        self.mode
-    }
-}
-
-impl fmt::Display for DictionaryObject {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        "<< ".fmt(f)?;
-        for (k, v) in self.iter() {
-            k.fmt(f)?;
-            " ".fmt(f)?;
-            v.fmt(f)?;
-            " ".fmt(f)?;
-        }
-        ">>".fmt(f)?;
-
-        Ok(())
     }
 }

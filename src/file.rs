@@ -1,12 +1,9 @@
 use std::io;
 
-use crate::object::Mode;
-
 #[derive(Clone)]
 pub struct FileObject {
     cursor: usize,
     inner: Vec<u8>,
-    pub(crate) mode: Mode,
 }
 
 impl io::Read for FileObject {
@@ -84,7 +81,6 @@ impl From<String> for FileObject {
         Self {
             cursor: 0,
             inner: value.bytes().collect(),
-            mode: Mode::default(),
         }
     }
 }
@@ -94,7 +90,6 @@ impl From<Vec<u8>> for FileObject {
         Self {
             cursor: 0,
             inner: value,
-            mode: Mode::default(),
         }
     }
 }

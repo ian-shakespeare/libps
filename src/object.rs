@@ -1,9 +1,6 @@
-use std::{cell::RefCell, fmt, hash, rc::Rc};
+use std::hash::Hash;
 
-use crate::{
-    array::ArrayObject, dictionary::DictionaryObject, file::FileObject, name::NameObject,
-    operator::OperatorObject, string::StringObject, Error, ErrorKind,
-};
+use crate::{composite::Composite, name::NameObject, operator::OperatorObject, Error, ErrorKind};
 
 #[derive(Clone)]
 pub enum Object {
@@ -14,17 +11,17 @@ pub enum Object {
     Mark,
     Name(NameObject),
     Null(Mode),
-    Operator((OperatorObject, Mode)),
+    Operator(OperatorObject),
     Real(f32),
 
     // Composite
-    Array(Rc<RefCell<ArrayObject>>),
-    Dictionary(Rc<RefCell<DictionaryObject>>),
-    File(Rc<RefCell<FileObject>>),
-    GState(Rc<RefCell<GState>>),
-    PackedArray(Rc<RefCell<PackedArray>>),
-    Save(Rc<RefCell<Save>>),
-    String(Rc<RefCell<StringObject>>),
+    Array(Composite),
+    Dictionary(Composite),
+    File(Composite),
+    GState(Composite),
+    PackedArray(Composite),
+    Save(Composite),
+    String(Composite),
 }
 
 impl Object {
@@ -53,10 +50,10 @@ impl Object {
         match self {
             Object::Name(name) => name.mode,
             Object::Null(mode) => *mode,
-            Object::Operator((_, mode)) => *mode,
-            Object::Array(array) => array.borrow().mode,
-            Object::File(file) => file.borrow().mode,
-            Object::String(string) => string.borrow().mode,
+            Object::Operator(operator) => operator.mode,
+            Object::Array(array) => array.mode,
+            Object::File(file) => file.mode,
+            Object::String(string) => string.mode,
             _ => Mode::Literal,
         }
     }
@@ -65,77 +62,36 @@ impl Object {
         match self {
             Object::Name(name) => name.mode = mode,
             Object::Null(current) => *current = mode,
-            Object::Operator((_, current)) => *current = mode,
-            Object::Array(array) => array.borrow_mut().mode = mode,
-            Object::File(file) => file.borrow_mut().mode = mode,
-            Object::String(string) => string.borrow_mut().mode = mode,
+            Object::Operator(operator) => operator.mode = mode,
+            Object::Array(array) => array.mode = mode,
+            Object::File(file) => file.mode = mode,
+            Object::String(string) => string.mode = mode,
             _ => (),
         };
     }
 }
 
-impl fmt::Debug for Object {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Object::Boolean(b) => b.fmt(f),
-            Object::Integer(i) => i.fmt(f),
-            Object::Mark => "mark".fmt(f),
-            Object::Name(n) => n.fmt(f),
-            Object::Null(_) => "null".fmt(f),
-            Object::Operator((o, _)) => o.to_string().fmt(f),
-            Object::Real(r) => r.fmt(f),
-            Object::Array(a) => a.fmt(f),
-            Object::Dictionary(d) => d.fmt(f),
-            Object::String(s) => s.fmt(f),
-            _ => "TODO".fmt(f),
-        }
-    }
-}
-
-impl fmt::Display for Object {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Object::Boolean(b) => b.fmt(f),
-            Object::Integer(i) => i.fmt(f),
-            Object::Mark => "mark".fmt(f),
-            Object::Name(n) => n.fmt(f),
-            Object::Null(_) => "null".fmt(f),
-            Object::Operator((o, _)) => o.to_string().fmt(f),
-            Object::Real(r) => r.fmt(f),
-            Object::Array(a) => a.borrow().fmt(f),
-            Object::Dictionary(d) => d.borrow().fmt(f),
-            Object::String(s) => s.borrow().fmt(f),
-            _ => "TODO".fmt(f),
-        }
-    }
-}
-
 impl Eq for Object {}
 
-impl hash::Hash for Object {
-    fn hash<H: hash::Hasher>(&self, state: &mut H) {
+impl Hash for Object {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             Object::Boolean(b) => b.hash(state),
+            Object::FontID => todo!(),
             Object::Integer(i) => i.hash(state),
+            Object::Mark => todo!(),
             Object::Name(n) => n.hash(state),
-            Object::Real(r) => {
-                let u = r.to_bits();
-                u.hash(state);
-            },
-            Object::Array(a) => {
-                for obj in a.borrow().iter() {
-                    obj.hash(state);
-                }
-            },
-            Object::Dictionary(d) => {
-                for (key, value) in d.borrow().iter() {
-                    key.hash(state);
-                    value.hash(state);
-                }
-            },
-            Object::String(s) => s.borrow().hash(state),
-            _ => {},
-        };
+            Object::Null(_) => todo!(),
+            Object::Operator(o) => o.hash(state),
+            Object::Real(r) => r.to_bits().hash(state),
+            Object::Array(a) => a.hash(state),
+            Object::Dictionary(d) => d.hash(state),
+            Object::File(f) => f.hash(state),
+            Object::GState(g) => g.hash(state),
+            Object::PackedArray(pa) => pa.hash(state),
+            Object::Save(s) => s.hash(state),
+            Object::String(s) => s.hash(state),
+        }
     }
 }
 
@@ -146,15 +102,15 @@ impl PartialEq for Object {
             (Object::Integer(lhs), Object::Integer(rhs)) => lhs == rhs,
             (Object::Integer(lhs), Object::Real(rhs)) => *lhs as f32 == *rhs,
             (Object::Name(lhs), Object::Name(rhs)) => lhs == rhs,
-            (Object::Name(lhs), Object::String(rhs)) => lhs.value() == rhs.borrow().value(),
+            (Object::Name(lhs), Object::String(rhs)) => todo!(),
             (Object::Operator(lhs), Object::Operator(rhs)) => lhs == rhs,
             (Object::Real(lhs), Object::Real(rhs)) => lhs == rhs,
             (Object::Real(lhs), Object::Integer(rhs)) => *lhs == *rhs as f32,
-            (Object::Array(lhs), Object::Array(rhs)) => Rc::ptr_eq(lhs, rhs),
-            (Object::Dictionary(lhs), Object::Dictionary(rhs)) => Rc::ptr_eq(lhs, rhs),
-            (Object::File(lhs), Object::File(rhs)) => Rc::ptr_eq(lhs, rhs),
-            (Object::String(lhs), Object::String(rhs)) => lhs == rhs,
-            (Object::String(lhs), Object::Name(rhs)) => lhs.borrow().value() == rhs.value(),
+            (Object::Array(lhs), Object::Array(rhs)) => lhs == rhs,
+            (Object::Dictionary(lhs), Object::Dictionary(rhs)) => lhs == rhs,
+            (Object::File(lhs), Object::File(rhs)) => lhs == rhs,
+            (Object::String(lhs), Object::String(rhs)) => todo!(),
+            (Object::String(lhs), Object::Name(rhs)) => todo!(),
             _ => false,
         }
     }
@@ -203,15 +159,3 @@ impl Mode {
         matches!(self, Mode::Executable)
     }
 }
-
-#[derive(Debug)]
-struct GState {}
-
-#[derive(Debug)]
-struct PackedArray {
-    inner: Vec<u8>,
-    mode: Mode,
-}
-
-#[derive(Debug)]
-struct Save {}

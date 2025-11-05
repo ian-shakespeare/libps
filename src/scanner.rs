@@ -1,29 +1,31 @@
 use std::{
-    cell::RefCell,
     io::{Read, Seek, SeekFrom},
-    rc::Rc,
     string,
 };
 
 use crate::{
-    array::ArrayObject,
     encoding::{decode_ascii85, decode_hex},
-    file::FileObject,
-    name::NameObject,
-    object::{Access, Mode, Object},
-    string::StringObject,
     Error, ErrorKind,
 };
 
 const FORM_FEED: u8 = b'\x0C';
 const BACKSPACE: u8 = b'\x08';
 
-pub(crate) struct Lexer {
-    input: FileObject,
+pub enum Token {
+    Integer(i32),
+    Real(f32),
+    String(Vec<u8>),
+    Name(String),
+    LiteralName(String),
+    Procedure(Vec<Token>),
 }
 
-impl Iterator for Lexer {
-    type Item = crate::Result<Object>;
+pub(crate) struct Scanner<T: Read + Seek> {
+    input: T,
+}
+
+impl<T: Read + Seek> Iterator for Scanner<T> {
+    type Item = crate::Result<Token>;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -35,50 +37,45 @@ impl Iterator for Lexer {
             let ch = self.peek_char()?;
             return match ch {
                 b'%' => {
-                    match self.lex_comment() {
+                    match self.scan_comment() {
                         Ok(_) => continue,
                         Err(e) => Some(Err(e)),
                     }
                 },
-                b'-' | b'.' | b'0'..=b'9' => Some(self.lex_numeric()),
-                b'(' => Some(self.lex_string_literal()),
-                b'<' => Some(self.lex_gt()),
-                b'{' => Some(self.lex_procedure()),
+                b'-' | b'.' | b'0'..=b'9' => Some(self.scan_numeric()),
+                b'(' => Some(self.scan_string_literal()),
+                b'<' => Some(self.scan_gt()),
+                b'{' => Some(self.scan_procedure()),
                 _ => {
                     let name = String::new();
-                    Some(self.lex_name(name))
+                    Some(self.scan_name(name))
                 },
             };
         }
     }
 }
 
-impl Lexer {
-    pub fn new<F: Into<FileObject>>(input: F) -> Self {
+impl<T: Read + Seek> Scanner<T> {
+    pub fn new<I: Into<T>>(input: I) -> Self {
         Self {
             input: input.into(),
         }
     }
 
-    fn lex_comment(&mut self) -> crate::Result<()> {
+    fn scan_comment(&mut self) -> crate::Result<()> {
         self.expect_char(b'%')?;
 
         loop {
             match self.next_char() {
-                None => break,
-                Some(ch) => {
-                    match ch {
-                        b'\n' | FORM_FEED => break,
-                        _ => {},
-                    }
-                },
+                None | Some(b'\n' | FORM_FEED) => break,
+                _ => {},
             }
         }
 
         Ok(())
     }
 
-    fn lex_gt(&mut self) -> crate::Result<Object> {
+    fn scan_gt(&mut self) -> crate::Result<Token> {
         self.expect_char(b'<')?;
 
         let Some(ch) = self.peek_char() else {
@@ -91,15 +88,15 @@ impl Lexer {
         match ch {
             b'<' => {
                 let _ = self.next_char();
-                Ok(Object::Name(NameObject::from("<<")))
+                Ok(Token::Name(String::from("<<")))
             },
-            b'~' => self.lex_string_base85(),
-            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => self.lex_string_hex(),
-            _ => self.lex_name("<".to_string()),
+            b'~' => self.scan_string_base85(),
+            b'0'..=b'9' | b'a'..=b'f' | b'A'..=b'F' => self.scan_string_hex(),
+            _ => self.scan_name("<".to_string()),
         }
     }
 
-    fn lex_name(&mut self, mut name: string::String) -> crate::Result<Object> {
+    fn scan_name(&mut self, mut name: string::String) -> crate::Result<Token> {
         loop {
             if self.next_is_whitespace() {
                 break;
@@ -111,12 +108,12 @@ impl Lexer {
 
             let first_ch = name.as_bytes().first().copied().unwrap_or(b'\0');
 
-            let lexing_delim =
+            let scaning_delim =
                 name == "<<" || name == ">>" || (name.len() == 1 && is_delimiter(first_ch));
 
-            let lexing_literal = first_ch == b'/';
+            let scaning_literal = first_ch == b'/';
 
-            if self.next_is_regular() && lexing_delim && !lexing_literal {
+            if self.next_is_regular() && scaning_delim && !scaning_literal {
                 break;
             }
 
@@ -128,13 +125,13 @@ impl Lexer {
 
         if name.starts_with('/') {
             name.remove(0);
-            Ok(Object::Name(NameObject::new(&name, Mode::Literal)))
+            Ok(Token::LiteralName(name))
         } else {
-            Ok(Object::Name(NameObject::new(&name, Mode::Executable)))
+            Ok(Token::Name(name))
         }
     }
 
-    fn lex_numeric(&mut self) -> crate::Result<Object> {
+    fn scan_numeric(&mut self) -> crate::Result<Token> {
         let mut numeric = string::String::new();
 
         loop {
@@ -164,14 +161,14 @@ impl Lexer {
                     match base.parse::<u32>() {
                         Ok(base) => {
                             match i32::from_str_radix(digits, base) {
-                                Ok(value) => Ok(Object::Integer(value)),
-                                Err(_) => self.lex_name(numeric),
+                                Ok(value) => Ok(Token::Integer(value)),
+                                Err(_) => self.scan_name(numeric),
                             }
                         },
-                        Err(_) => self.lex_name(numeric),
+                        Err(_) => self.scan_name(numeric),
                     }
                 },
-                _ => self.lex_name(numeric),
+                _ => self.scan_name(numeric),
             };
         }
 
@@ -182,27 +179,27 @@ impl Lexer {
                     match (decimal.parse::<f32>(), exponent.parse::<i32>()) {
                         (Ok(decimal), Ok(exponent)) => {
                             let value = decimal * 10.0_f32.powi(exponent);
-                            Ok(Object::Real(value))
+                            Ok(Token::Real(value))
                         },
-                        _ => self.lex_name(numeric),
+                        _ => self.scan_name(numeric),
                     }
                 },
-                _ => self.lex_name(numeric),
+                _ => self.scan_name(numeric),
             };
         }
 
         match numeric.parse::<i32>() {
-            Ok(i) => Ok(Object::Integer(i)),
+            Ok(i) => Ok(Token::Integer(i)),
             Err(_) => {
                 match numeric.parse::<f32>() {
-                    Ok(r) => Ok(Object::Real(r)),
-                    Err(_) => self.lex_name(numeric),
+                    Ok(r) => Ok(Token::Real(r)),
+                    Err(_) => self.scan_name(numeric),
                 }
             },
         }
     }
 
-    fn lex_procedure(&mut self) -> crate::Result<Object> {
+    fn scan_procedure(&mut self) -> crate::Result<Token> {
         self.expect_char(b'{')?;
 
         let mut objs = Vec::new();
@@ -212,7 +209,7 @@ impl Lexer {
                 .next()
                 .ok_or(Error::new(ErrorKind::SyntaxError, "unterminated procedure"))??;
 
-            if let Object::Name(ref n) = obj {
+            if let Token::Name(ref n) = obj {
                 if n == "}" {
                     break;
                 }
@@ -221,12 +218,10 @@ impl Lexer {
             objs.push(obj);
         }
 
-        let arr = ArrayObject::new(objs, Access::ExecuteOnly, Mode::Executable);
-
-        Ok(Object::Array(Rc::new(RefCell::new(arr))))
+        Ok(Token::Procedure(objs))
     }
 
-    fn lex_string_base85(&mut self) -> crate::Result<Object> {
+    fn scan_string_base85(&mut self) -> crate::Result<Token> {
         let mut string = string::String::new();
 
         loop {
@@ -253,12 +248,10 @@ impl Lexer {
             }
         }
 
-        let string = StringObject::new(decode_ascii85(&string)?, Access::Unlimited, Mode::Literal);
-
-        Ok(Object::String(Rc::new(RefCell::new(string))))
+        Ok(Token::String(decode_ascii85(&string)?.into()))
     }
 
-    fn lex_string_hex(&mut self) -> crate::Result<Object> {
+    fn scan_string_hex(&mut self) -> crate::Result<Token> {
         let mut string = String::new();
 
         loop {
@@ -278,12 +271,10 @@ impl Lexer {
             }
         }
 
-        let string = StringObject::new(decode_hex(&string)?, Access::Unlimited, Mode::Literal);
-
-        Ok(Object::String(Rc::new(RefCell::new(string))))
+        Ok(Token::String(decode_hex(&string)?.into()))
     }
 
-    fn lex_string_literal(&mut self) -> crate::Result<Object> {
+    fn scan_string_literal(&mut self) -> crate::Result<Token> {
         self.expect_char(b'(')?;
 
         let mut string = String::new();
@@ -362,9 +353,7 @@ impl Lexer {
             }
         }
 
-        let string = StringObject::new(string, Access::Unlimited, Mode::Literal);
-
-        Ok(Object::String(Rc::new(RefCell::new(string))))
+        Ok(Token::String(string.into()))
     }
 
     fn expect_char(&mut self, ch: u8) -> crate::Result<()> {
