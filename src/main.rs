@@ -1,11 +1,9 @@
-use std::io::{self, stdin, stdout, Error, ErrorKind};
+use std::io::{stdin, stdout};
 
 use libps::Interpreter;
 
-fn main() -> io::Result<()> {
+fn main() {
     let mut interpreter = Interpreter::new(stdin().lock(), stdout().lock());
 
-    interpreter
-        .executive()
-        .or(Err(Error::from(ErrorKind::BrokenPipe)))
+    interpreter.executive()
 }

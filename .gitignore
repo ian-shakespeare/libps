@@ -17,3 +17,6 @@ Cargo.lock
 .vscode
 *.swp
 .idea/
+
+# OS files
+*.DS_Store

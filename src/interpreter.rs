@@ -94,7 +94,9 @@ impl Interpreter {
             Object::Name(name) => {
                 let def = self.find(&Object::Name(name))?;
                 self.operand_stack.push(def.clone());
-                self.exec()
+                self.exec();
+
+                Ok(())
             },
             Object::Operator(obj) => {
                 match obj.operator() {
@@ -104,7 +106,9 @@ impl Interpreter {
                     Operator::Flush => self.flush(),
                     Operator::Print => self.print(),
                     Operator::Quit => todo!(),
-                }
+                };
+
+                Ok(())
             },
             Object::Array(obj) => {
                 let array = self
@@ -113,7 +117,7 @@ impl Interpreter {
 
                 for obj in array.iter() {
                     self.operand_stack.push(obj.clone()); // TODO: find a way to avoid cloning here
-                    self.exec()?;
+                    self.exec();
                 }
 
                 Ok(())
@@ -127,13 +131,22 @@ impl Interpreter {
                 self.execute_tokens(scanner)
             },
             Object::String(obj) => {
-                let string = self
-                    .get_composite_value::<StringObject>(obj.address)
-                    .cloned()?;
-                let cursor = Cursor::new(string.value());
-                let scanner: Scanner<Cursor<&[u8]>> = Scanner::new(cursor);
+                match obj.mode {
+                    Mode::Literal => {
+                        self.operand_stack.push(Object::String(obj));
 
-                self.execute_tokens(scanner)
+                        Ok(())
+                    },
+                    Mode::Executable => {
+                        let string = self
+                            .get_composite_value::<StringObject>(obj.address)
+                            .cloned()?;
+                        let cursor = Cursor::new(string.value());
+                        let scanner: Scanner<Cursor<&[u8]>> = Scanner::new(cursor);
+
+                        self.execute_tokens(scanner)
+                    },
+                }
             },
             _ => Err(Error::new(ErrorKind::Unregistered, "not implemented")),
         }
@@ -148,7 +161,9 @@ impl Interpreter {
                 Token::Integer(value) => Ok(Object::Integer(value)),
                 Token::Real(value) => Ok(Object::Real(value)),
                 Token::String(value) => {
-                    let composite = self.create_composite(StringObject::from(value));
+                    let mut composite = self.create_composite(StringObject::from(value));
+                    composite.mode = Mode::Literal;
+
                     Ok(Object::String(composite))
                 },
                 Token::Name(value) => Ok(Object::Name(NameObject::from(value))),
@@ -162,7 +177,7 @@ impl Interpreter {
             };
 
             self.operand_stack.push(obj?);
-            self.exec()?;
+            self.exec();
         }
 
         Ok(())
@@ -170,7 +185,7 @@ impl Interpreter {
 
     fn initiate_error(&mut self, _source: Object, error: Error) {
         // TODO: actually initiate the error
-        println!("{error}");
+        println!("error")
     }
 
     fn find(&self, key: &Object) -> crate::Result<Object> {
@@ -180,7 +195,6 @@ impl Interpreter {
             }
         }
 
-        println!("find error");
         Err(Error::from(ErrorKind::Undefined))
     }
 
@@ -246,107 +260,114 @@ impl Interpreter<Global> {
             memory_region: PhantomData,
         }
     }
+
+    fn operate<F: Fn(&mut Self) -> crate::Result<()>>(&mut self, action: F) {
+        let backup = self.operand_stack.clone();
+
+        if let Err(e) = action(self) {
+            self.operand_stack = backup;
+            println!("recovered from an error");
+            // TODO: other error stuff
+        }
+    }
 }
 
 impl Interpreter {
-    pub fn cvlit(&mut self) -> crate::Result<()> {
-        let mut obj = self.pop()?;
+    pub fn cvlit(&mut self) {
+        self.operate(|ctx| {
+            let mut obj = ctx.pop()?;
 
-        if obj.mode().is_executable() {
-            obj.set_mode(Mode::Literal);
-        }
-
-        self.operand_stack.push(obj);
-
-        Ok(())
-    }
-
-    pub fn cvx(&mut self) -> crate::Result<()> {
-        let mut obj = self.pop()?;
-
-        if obj.mode().is_literal() {
-            obj.set_mode(Mode::Executable);
-        }
-
-        self.operand_stack.push(obj);
-
-        Ok(())
-    }
-
-    pub fn exec(&mut self) -> crate::Result<()> {
-        println!("EXECING");
-        match self.pop() {
-            Ok(obj) => {
-                match obj.mode() {
-                    Mode::Literal => {
-                        self.operand_stack.push(obj);
-                    },
-                    Mode::Executable => {
-                        self.execution_stack.push(obj.clone());
-
-                        match self.execute_stack() {
-                            Ok(_) => (),
-                            Err(e) => self.initiate_error(obj, e),
-                        }
-                    },
-                }
-            },
-            Err(e) => {
-                let op = OperatorObject::from(Operator::Exec);
-                self.initiate_error(Object::Operator(op), e);
-            },
-        };
-
-        Ok(())
-    }
-
-    pub fn executive(&mut self) -> crate::Result<()> {
-        let _ = write!(self.stdout, "libPS version 0.0.0\n"); // TODO: parameterize this version
-        let _ = self.stdout.flush();
-
-        loop {
-            let _ = write!(self.stdout, "PS>");
-            let _ = self.stdout.flush();
-
-            let mut input = String::new();
-            self.stdin
-                .read_line(&mut input)
-                .or(Err(Error::from(ErrorKind::IoError)))?;
-
-            if input.trim() == "quit" {
-                break;
+            if obj.mode().is_executable() {
+                obj.set_mode(Mode::Literal);
             }
 
-            let composite = self.create_composite(StringObject::from(input));
-            self.operand_stack.push(Object::String(composite));
-            self.exec()?;
-        }
+            ctx.operand_stack.push(obj);
 
-        Ok(())
+            Ok(())
+        });
     }
 
-    pub fn flush(&mut self) -> crate::Result<()> {
-        self.stdout.flush().or(Err(Error::from(ErrorKind::IoError)))
+    pub fn cvx(&mut self) {
+        self.operate(|ctx| {
+            let mut obj = ctx.pop()?;
+
+            if obj.mode().is_literal() {
+                obj.set_mode(Mode::Executable);
+            }
+
+            ctx.operand_stack.push(obj);
+
+            Ok(())
+        });
     }
 
-    pub fn print(&mut self) -> crate::Result<()> {
-        println!("PRINTING");
-        let composite = self.pop_comp()?;
-        let string = self
-            .get_composite_value::<StringObject>(composite.address)
-            .cloned()?;
+    pub fn exec(&mut self) {
+        self.operate(|ctx| {
+            let obj = ctx.pop()?;
+            match obj.mode() {
+                Mode::Literal => {
+                    ctx.operand_stack.push(obj);
+                },
+                Mode::Executable => {
+                    ctx.execution_stack.push(obj.clone());
+                    ctx.execute_stack()?;
+                },
+            };
 
-        if !composite.access.is_readable() {
-            return Err(Error::from(ErrorKind::InvalidAccess));
-        }
+            Ok(())
+        });
+    }
 
-        // TODO: check stdout for write permissions
+    pub fn executive(&mut self) {
+        self.operate(|ctx| {
+            let _ = write!(ctx.stdout, "libPS version 0.0.0\n"); // TODO: parameterize this version
+            let _ = ctx.stdout.flush();
 
-        let _ = self
-            .stdout
-            .write(string.value())
-            .or(Err(Error::from(ErrorKind::IoError)))?;
+            loop {
+                let _ = write!(ctx.stdout, "PS>");
+                let _ = ctx.stdout.flush();
 
-        Ok(())
+                let mut input = String::new();
+                ctx.stdin
+                    .read_line(&mut input)
+                    .or(Err(Error::from(ErrorKind::IoError)))?;
+
+                if input.trim() == "quit" {
+                    break;
+                }
+
+                let composite = ctx.create_composite(StringObject::from(input));
+                ctx.operand_stack.push(Object::String(composite));
+                ctx.exec();
+            }
+
+            Ok(())
+        });
+    }
+
+    pub fn flush(&mut self) {
+        self.operate(|ctx| ctx.stdout.flush().or(Err(Error::from(ErrorKind::IoError))));
+    }
+
+    pub fn print(&mut self) {
+        self.operate(|ctx| {
+            let composite = ctx.pop_comp()?;
+            let string = ctx
+                .get_composite_value::<StringObject>(composite.address)
+                .cloned()?;
+
+            if !composite.access.is_readable() {
+                return Err(Error::from(ErrorKind::InvalidAccess));
+            }
+
+            // TODO: check stdout for write permissions
+
+            let _ = ctx
+                .stdout
+                .write(string.value())
+                .or(Err(Error::from(ErrorKind::IoError)))?;
+
+            Ok(())
+        });
     }
 }
