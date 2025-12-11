@@ -98,6 +98,13 @@ impl Interpreter {
 
                 Ok(())
             },
+            Object::Null(mode) => {
+                if mode.is_literal() {
+                    self.operand_stack.push(Object::Null(Mode::Literal));
+                }
+
+                Ok(())
+            },
             Object::Operator(obj) => {
                 match obj.operator() {
                     Operator::Cvlit => self.cvlit(),
@@ -106,6 +113,7 @@ impl Interpreter {
                     Operator::Flush => self.flush(),
                     Operator::Print => self.print(),
                     Operator::Quit => todo!(),
+                    Operator::Undefined => println!("received an `undefined` error"),
                 };
 
                 Ok(())
@@ -183,11 +191,6 @@ impl Interpreter {
         Ok(())
     }
 
-    fn initiate_error(&mut self, _source: Object, error: Error) {
-        // TODO: actually initiate the error
-        println!("error")
-    }
-
     fn find(&self, key: &Object) -> crate::Result<Object> {
         for dict in self.dictionary_stack.iter().rev() {
             if let Some(obj) = dict.get(key).cloned() {
@@ -225,6 +228,7 @@ impl Interpreter {
 impl Interpreter<Global> {
     pub fn new(stdin: StdinLock<'static>, stdout: StdoutLock<'static>) -> Self {
         let mut global_memory: Container<CompositeValue> = Container::default();
+        let mut local_memory: Container<CompositeValue> = Container::default();
 
         let ops = vec![
             ("exec", Operator::Exec),
@@ -246,15 +250,59 @@ impl Interpreter<Global> {
             system_dict.insert(Object::String(key), Object::Operator(value));
         }
 
+        let mut error_info = DictionaryObject::default();
+        error_info.insert(
+            Object::Name(NameObject::from("newerror")),
+            Object::Boolean(false),
+        );
+        error_info.insert(
+            Object::Name(NameObject::from("errorinfo")),
+            Object::Null(Mode::Executable),
+        );
+        error_info.insert(
+            Object::Name(NameObject::from("recordstacks")),
+            Object::Boolean(true),
+        );
+        error_info.insert(
+            Object::Name(NameObject::from("binary")),
+            Object::Boolean(false),
+        );
+
+        let error_info_addr = local_memory.insert(CompositeValue::Dictionary(error_info));
+        system_dict.insert(
+            Object::Name(NameObject::from("$error")),
+            Object::Dictionary(Composite {
+                address: error_info_addr,
+                access: Access::Unlimited,
+                mode: Mode::Executable,
+            }),
+        );
+
+        let mut error_dict = DictionaryObject::default();
+        error_dict.insert(
+            Object::Name(NameObject::from("undefined")),
+            Object::Operator(OperatorObject::from(Operator::Undefined)),
+        );
+
+        let error_dict_addr = local_memory.insert(CompositeValue::Dictionary(error_dict));
+        system_dict.insert(
+            Object::Name(NameObject::from("errordict")),
+            Object::Dictionary(Composite {
+                address: error_dict_addr,
+                access: Access::Unlimited,
+                mode: Mode::Executable,
+            }),
+        );
+
         let dictionary_stack = vec![system_dict];
 
         Self {
             dictionary_stack,
             global_memory,
+            local_memory,
             stdin,
             stdout,
             execution_stack: Vec::new(),
-            local_memory: Container::default(),
             operand_stack: Vec::new(),
 
             memory_region: PhantomData,
@@ -266,8 +314,33 @@ impl Interpreter<Global> {
 
         if let Err(e) = action(self) {
             self.operand_stack = backup;
-            println!("recovered from an error");
-            // TODO: other error stuff
+
+            // TODO: push cause object to operand stack
+
+            let error_dict_addr = self
+                .find(&Object::Name(NameObject::from("errordict")))
+                .expect("failed to find errordict in dict stack")
+                .into_composite()
+                .expect("errordict must be composite")
+                .address;
+
+            let error_dict: &DictionaryObject = self
+                .local_memory
+                .get(error_dict_addr)
+                .expect("failed to find errordict in global mem")
+                .try_into()
+                .expect("errordict must be a dictionary");
+
+            let kind = e.kind();
+            let error_obj: Object = e.into();
+            let handler = error_dict
+                .get(&error_obj)
+                .cloned()
+                .expect(&format!("failed to find handler for '{:?}'", kind));
+
+            self.execution_stack.push(handler);
+            self.execute_stack()
+                .expect("failed to execute error handler");
         }
     }
 }

@@ -25,6 +25,19 @@ pub enum Object {
 }
 
 impl Object {
+    pub fn into_composite(self) -> crate::Result<Composite> {
+        match self {
+            Object::Array(cmp)
+            | Object::Dictionary(cmp)
+            | Object::File(cmp)
+            | Object::GState(cmp)
+            | Object::PackedArray(cmp)
+            | Object::Save(cmp)
+            | Object::String(cmp) => Ok(cmp),
+            _ => Err(Error::new(ErrorKind::TypeCheck, "expected composite")),
+        }
+    }
+
     pub fn into_int(self) -> crate::Result<i32> {
         match self {
             Object::Integer(i) => Ok(i),
@@ -72,6 +85,29 @@ impl Object {
 }
 
 impl Eq for Object {}
+
+impl From<Error> for Object {
+    fn from(value: Error) -> Self {
+        let mut name = NameObject::from(match value.kind() {
+            ErrorKind::DictStackUnderflow => "dictstackunderflow",
+            ErrorKind::InvalidAccess => "invalidaccess",
+            ErrorKind::IoError => "ioerror",
+            ErrorKind::LimitCheck => "limitcheck",
+            ErrorKind::RangeCheck => "rangecheck",
+            ErrorKind::StackUnderflow => "stackunderflow",
+            ErrorKind::SyntaxError => "syntaxerror",
+            ErrorKind::TypeCheck => "typecheck",
+            ErrorKind::Undefined => "undefined",
+            ErrorKind::UndefinedResult => "undefinedresult",
+            ErrorKind::UnmatchedMark => "unmatchedmark",
+            ErrorKind::Unregistered => "unregistered",
+            ErrorKind::VmError => "vmerror",
+        });
+        name.mode = Mode::Executable;
+
+        Self::Name(name)
+    }
+}
 
 impl Hash for Object {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {

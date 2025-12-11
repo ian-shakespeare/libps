@@ -77,6 +77,22 @@ pub enum Operator {
     /// See Also: __write__, __flush__, __=__, __==__, __printobject__
     Print,
     Quit,
+
+    /// (error)
+    /// A name used as a dictionary key in some context cannot be found. This occurs if a
+    /// name is looked up explicitly in a specified dictionary (__get__) or in the current dic-
+    /// tionary stack (__load__) and is not found. It also occurs if an executable name is en-
+    /// countered by the interpreter and is not found in any dictionary on the dictionary
+    /// stack.
+    ///
+    /// A few PostScript operators are disabled in certain contexts—for example, it is il-
+    /// legal to execute __image__, or operators that specify colors or set color-related param-
+    /// eters in the graphics state, after invoking __setcachedevice__ or __setcachedevice2__ in a
+    /// __BuildChar__, __BuildGlyph__, or __CharStrings__ procedure. Attempting to execute such dis-
+    /// abled operators results in an __undefined__ error.
+    ///
+    /// See Also: __known__, __where__, __load__, __exec__, __get__
+    Undefined,
 }
 
 impl fmt::Display for Operator {
@@ -88,6 +104,7 @@ impl fmt::Display for Operator {
             Operator::Flush => "flush".fmt(f),
             Operator::Print => "print".fmt(f),
             Operator::Quit => "quit".fmt(f),
+            Operator::Undefined => "undefined".fmt(f),
         }
     }
 }
